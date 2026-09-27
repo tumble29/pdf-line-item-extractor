@@ -6,12 +6,14 @@
  *
  *   - header words     a SECOND opinion on what a column means (roles.ts)
  *   - page titles      the returns/credit check and the summary warning (page-title.ts)
- *   - totals labels    telling a "Total" line from a line item (items.ts)
+ *   - totals labels    telling a "Total" line from a line item (items.ts), and
+ *                      which kind of total a printed figure is (totals.ts)
+ *   - GST words        whether the amounts include GST (totals.ts)
  *   - carried forward  lines that repeat a total from another page (table.ts)
+ *   - counts           words that are not counts, months and document-number
+ *                      labels, for the contradiction scan (contradictions.ts)
  *
- * This file is data plus the functions that match it (normaliseForMatching,
- * findWord, headerOpinion, hasDescriptionHeader and startsWithTotalsLabel),
- * and nothing else. It holds
+ * This file is data plus the functions that match it, and nothing else. It holds
  * English only. Documents in other languages are still read: tables are found
  * by layout and columns by their numbers, and a page whose headings we don't
  * recognise gets a warning that the word-based checks may not work on it. To
@@ -69,17 +71,43 @@ export const SUMMARY_WORDS: readonly WordList[] = [{ lang: "en", words: ["summar
 // Totals
 // ---------------------------------------------------------------------------
 
+/** The kinds of printed total (the same four as StatedTotal.label in the contract). */
+export type TotalKind = "subtotal" | "gst" | "total" | "amount_due";
+
 /**
- * Labels of printed totals, per kind. items.ts uses them all together, to
- * tell a "Total" line from a line item. The kinds will matter when the printed
- * totals are read.
+ * Labels of printed totals, per kind:
+ *
+ *   subtotal    the lines added up, before GST
+ *   gst         the tax line
+ *   total       what the whole document comes to
+ *   amount_due  what is still to pay; shown, never checked against the lines
+ *
+ * They are used in two ways. To spot a "Total" line inside a table, the line
+ * only has to START with one of them ("Total 25 $413.50", see
+ * startsWithTotalsLabel). To give a printed figure its kind, the WHOLE label
+ * must be one of them, maybe with a GST basis phrase after it (see
+ * totalsLabelKind): "Total ex GST" is a subtotal, but "Total Qty" or "GST
+ * No." is not a money total at all.
  */
-export const TOTAL_LABELS: Record<"subtotal" | "gst" | "total" | "amount_due", readonly WordList[]> = {
-  subtotal: [{ lang: "en", words: ["subtotal", "sub total", "sub-total", "total ex gst", "total excl gst"] }],
-  gst: [{ lang: "en", words: ["gst"] }],
-  total: [{ lang: "en", words: ["total", "total inc gst", "total incl gst", "grand total"] }],
-  amount_due: [{ lang: "en", words: ["amount due", "balance", "balance due"] }],
+export const TOTAL_LABELS: Record<TotalKind, readonly WordList[]> = {
+  subtotal: [{ lang: "en", words: ["subtotal", "sub total", "sub-total", "net total", "total ex gst", "total excl gst", "total excluding gst"] }],
+  gst: [{ lang: "en", words: ["gst", "total gst", "gst total", "gst amount"] }],
+  total: [
+    { lang: "en", words: ["total", "total inc gst", "total incl gst", "total including gst", "grand total", "invoice total"] },
+  ],
+  amount_due: [{ lang: "en", words: ["amount due", "amount payable", "balance", "balance due"] }],
 };
+
+/**
+ * Words that say whether amounts include GST. A basis word and "gst" must both
+ * be in the text, in either order ("Total incl GST", "GST inclusive"). The
+ * tax word is its own list, so another tax name can be added later.
+ */
+export const GST_BASIS_WORDS = {
+  inclusive: [{ lang: "en", words: ["inc", "incl", "including", "inclusive"] }],
+  exclusive: [{ lang: "en", words: ["ex", "excl", "excluding", "exclusive"] }],
+  tax: [{ lang: "en", words: ["gst"] }],
+} as const satisfies Record<string, readonly WordList[]>;
 
 /** The word "total", for spotting a column that mixes per-item figures and totals ("480g total"). */
 export const TOTAL_WORD: readonly WordList[] = [{ lang: "en", words: ["total"] }];
@@ -91,6 +119,43 @@ export const TOTAL_WORD: readonly WordList[] = [{ lang: "en", words: ["total"] }
 /** Lines that repeat a total from another page. Counting them as items would double-count money. */
 export const CARRIED_FORWARD: readonly WordList[] = [
   { lang: "en", words: ["carried forward", "brought forward", "b/f", "c/f"] },
+];
+
+// ---------------------------------------------------------------------------
+// The contradiction scan
+// ---------------------------------------------------------------------------
+
+/**
+ * Words after a number that show it is not a count of goods, so two different
+ * numbers before them are not a contradiction:
+ *   - small words: "Site 1 of 4", "Page 1 of 8", "5 to 10", "3 x 4"
+ *   - time: "valid for 30 days", "terms 7 days", "7 am", "2 years"
+ *   - rates: "15 percent"
+ *   - units of measure: "1200 mm x 2400 mm", "max load 1000 kg"
+ * (Month names are their own list, below.) Words are compared in their
+ * singular form, so "day" covers "days".
+ */
+export const NOT_COUNT_WORDS: readonly WordList[] = [
+  { lang: "en", words: ["of", "to", "and", "or", "at", "in", "on", "the", "a", "an", "x", "by", "for", "from", "per", "with"] },
+  { lang: "en", words: ["second", "minute", "min", "hour", "hr", "day", "week", "month", "year", "am", "pm", "working", "business"] },
+  { lang: "en", words: ["percent", "pct"] },
+  { lang: "en", words: ["mm", "cm", "m", "km", "kg", "g", "t", "l", "ml", "lm", "m2", "m3", "sqm", "mtr", "tonne", "litre", "metre"] },
+];
+
+/** Month names and their short forms, so a date ("24 August 2026") is never read as a count of "August". */
+export const MONTHS: readonly WordList[] = [
+  {
+    lang: "en",
+    words: [
+      "january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december",
+      "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec",
+    ],
+  },
+];
+
+/** Labels of document numbers. A line that starts with one ("Invoice No: 1234") holds no counts. */
+export const DOCUMENT_NUMBER_LABELS: readonly WordList[] = [
+  { lang: "en", words: ["document no", "doc no", "invoice no", "order no", "docket no", "po", "ref", "reference"] },
 ];
 
 // ---------------------------------------------------------------------------
@@ -197,31 +262,137 @@ export function hasDescriptionHeader(headers: readonly (string | null)[]): boole
   return headers.some((header) => header !== null && headerOpinion(header, true).role === "description");
 }
 
-/** Every totals label (subtotal, GST, total, amount due) in one list. */
-const ALL_TOTAL_LABELS: readonly WordList[] = Object.values(TOTAL_LABELS).flat();
-
 /**
- * True when `text` STARTS with a totals label (TOTAL_LABELS), as a whole word
- * ("Total", "Subtotal:", "GST 15%"). "Totally" does not count, and a label
- * later in the text ("Freight total") does not count either, because a line
- * item's description can contain such words. A label joined to a word by a
- * hyphen ("GST-free delivery") is part of that word, so it does not count.
- *
- * An English label may also have a plural "s" ("Totals"), as in findWord.
- * items.ts uses it to find "Total" lines inside a table, and roles.ts to keep
- * their numbers out of the column facts.
+ * The longest word or phrase from `lists` that `text` STARTS with, as a whole
+ * word, or null. After the phrase, the next character must not be a letter,
+ * a digit or a hyphen: "Total:" starts with "total", but "Totally" does not,
+ * and neither does "GST-free delivery" (a hyphen joins the words into one).
+ * An English word may also have a plural "s" ("Totals").
  */
-export function startsWithTotalsLabel(text: string): boolean {
+export function startsWithWord(text: string, lists: readonly WordList[]): string | null {
   const normal = normaliseForMatching(text);
-  return ALL_TOTAL_LABELS.some((list) =>
-    list.words.some((word) => {
+  let best: string | null = null;
+  for (const list of lists) {
+    for (const word of list.words) {
       const label = normaliseForMatching(word);
-      if (!normal.startsWith(label)) return false;
+      if (!normal.startsWith(label)) continue;
       const rest = normal.slice(label.length);
       const after = list.lang === "en" && rest.startsWith("s") ? rest.slice(1) : rest;
-      // The label must end at a word boundary: the next character is not a
-      // letter, a digit or a hyphen.
-      return !/^[\p{L}\p{N}-]/u.test(after);
-    }),
-  );
+      if (/^[\p{L}\p{N}-]/u.test(after)) continue;
+      if (best === null || label.length > best.length) best = label;
+    }
+  }
+  return best;
+}
+
+/**
+ * True when `text` starts with a totals label ("Total", "Subtotal:", "GST
+ * 15%", "Total 25 items"), whatever follows it. items.ts uses it to find
+ * "Total" lines inside a table, roles.ts to keep their numbers out of the
+ * column facts, and totals.ts to notice a totals line whose amount it can't
+ * read. A label later in the line ("Freight total") does not count, because
+ * a line item's description can contain such words.
+ */
+export function startsWithTotalsLabel(text: string): boolean {
+  return (Object.values(TOTAL_LABELS) as (readonly WordList[])[]).some((lists) => startsWithWord(text, lists) !== null);
+}
+
+/** True when any word from `lists` appears in `text` as a whole word (English plurals allowed, as in findWord). */
+function hasWholeWord(text: string, lists: readonly WordList[]): boolean {
+  return findWord(text, lists) !== null;
+}
+
+/**
+ * A label made ready for the exact-label rule: lower case, a percentage
+ * removed ("GST 15%" -> "gst"), every mark that is not a letter, a digit, "#"
+ * or a space turned into a space ("Total (excl. GST):" -> "total excl gst"),
+ * a hyphen between two letters turned into a space ("Sub-total" -> "sub
+ * total"), and single spaces. "#" is kept, so "GST #" is not "GST".
+ */
+function tidyLabel(text: string): string {
+  return normaliseForMatching(text)
+    .replace(/\d+(?:[.,]\d+)?\s?%/gu, " ")
+    .replace(/(?<=\p{L})-(?=\p{L})/gu, " ")
+    .replace(/[^\p{L}\p{N}#\s]/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
+/**
+ * What a phrase after a totals label says about GST: "inclusive" for "incl
+ * GST", "including GST", "GST inclusive" or "inclusive of GST"; "exclusive"
+ * for the same with "ex", "excl", "excluding" or "exclusive"; null for any
+ * other words.
+ */
+function basisPhrase(rest: string): "inclusive" | "exclusive" | null {
+  const words = rest.split(" ");
+  // The lists hold fixed words; as plain string lists they can be searched for any word.
+  const wordsOf = (lists: readonly WordList[]): readonly string[] => lists.flatMap((list) => list.words);
+  const tax = wordsOf(GST_BASIS_WORDS.tax);
+  const basisOf = (word: string | undefined): "inclusive" | "exclusive" | null => {
+    if (word === undefined) return null;
+    if (wordsOf(GST_BASIS_WORDS.inclusive).includes(word)) return "inclusive";
+    if (wordsOf(GST_BASIS_WORDS.exclusive).includes(word)) return "exclusive";
+    return null;
+  };
+  // "<basis> gst", "<basis> of gst", "gst <basis>".
+  if (words.length === 2 && tax.includes(words[1])) return basisOf(words[0]);
+  if (words.length === 3 && words[1] === "of" && tax.includes(words[2])) return basisOf(words[0]);
+  if (words.length === 2 && tax.includes(words[0])) return basisOf(words[1]);
+  return null;
+}
+
+/**
+ * The kind of total a printed figure's label names, or null when the label is
+ * not exactly a totals label. The whole label must be a label from
+ * TOTAL_LABELS (an English plural "s" is fine, "Totals"), maybe followed by a
+ * GST basis phrase:
+ *
+ *   "Total:", "TOTAL", "Grand total"          total
+ *   "Total incl. GST", "Total (GST inclusive)" total
+ *   "Total ex GST", "Total (excl. GST)"        subtotal: the lines before GST
+ *   "Subtotal", "Sub-total:"                   subtotal
+ *   "GST 15%", "Total GST"                     gst
+ *   "Balance due"                              amount_due
+ *   "Total Qty", "Total pallets", "GST No."    null: not a money total
+ *
+ * A figure with no kind is not ignored: totals.ts may still use it, but only
+ * when it equals the sum of the lines.
+ */
+export function totalsLabelKind(text: string): TotalKind | null {
+  const label = tidyLabel(text);
+  for (const [kind, lists] of Object.entries(TOTAL_LABELS) as [TotalKind, readonly WordList[]][]) {
+    for (const list of lists) {
+      for (const word of list.words) {
+        const phrase = tidyLabel(word);
+        if (label === phrase || (list.lang === "en" && label === `${phrase}s`)) return kind;
+      }
+    }
+  }
+  // A label, then a GST basis phrase: "Total incl GST", "Subtotal ex GST".
+  for (const [kind, lists] of Object.entries(TOTAL_LABELS) as [TotalKind, readonly WordList[]][]) {
+    for (const list of lists) {
+      for (const word of list.words) {
+        const phrase = tidyLabel(word);
+        if (!label.startsWith(`${phrase} `)) continue;
+        const basis = basisPhrase(label.slice(phrase.length + 1));
+        if (basis === null) continue;
+        // A total that says it is before GST is the subtotal.
+        return kind === "total" && basis === "exclusive" ? "subtotal" : kind;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * What a heading or a totals label says about GST: "inclusive" for "Total
+ * incl GST" or "Amount (GST inclusive)", "exclusive" for "Total ex GST", or
+ * null when it doesn't say. Both a basis word and the tax word must be there.
+ */
+export function gstBasisOf(text: string): "inclusive" | "exclusive" | null {
+  if (!hasWholeWord(text, GST_BASIS_WORDS.tax)) return null;
+  if (hasWholeWord(text, GST_BASIS_WORDS.inclusive)) return "inclusive";
+  if (hasWholeWord(text, GST_BASIS_WORDS.exclusive)) return "exclusive";
+  return null;
 }

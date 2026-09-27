@@ -18,6 +18,10 @@ import {
   normaliseForMatching,
   SUMMARY_WORDS,
   TOTAL_LABELS,
+  gstBasisOf,
+  startsWithTotalsLabel,
+  startsWithWord,
+  totalsLabelKind,
 } from "@/lib/engine/vocabulary";
 
 describe("normaliseForMatching", () => {
@@ -161,5 +165,48 @@ describe("hasDescriptionHeader", () => {
 
   it("never counts 'Item' itself as the description header", () => {
     expect(hasDescriptionHeader(["Item", "Qty"])).toBe(false);
+  });
+});
+
+describe("totalsLabelKind", () => {
+  it.each([
+    ["Total", "total"],
+    ["Total:", "total"],
+    ["Totals", "total"],
+    ["Grand Total", "total"],
+    ["Subtotal", "subtotal"],
+    ["Sub-total:", "subtotal"],
+    ["Total ex GST", "subtotal"],
+    ["Total incl GST", "total"],
+    ["GST 15%", "gst"],
+    ["Balance due", "amount_due"],
+  ])("reads '%s' as %s", (label, kind) => {
+    expect(totalsLabelKind(label)).toBe(kind);
+  });
+
+  it.each(["Totally new stock", "Freight total", "GST-free delivery", "Summe", ""])("gives '%s' no kind", (label) => {
+    expect(totalsLabelKind(label)).toBeNull();
+    expect(startsWithTotalsLabel(label)).toBe(false);
+  });
+});
+
+describe("startsWithWord", () => {
+  it("finds the longest phrase at the start, as a whole word", () => {
+    expect(startsWithWord("Invoice No: 4471", [{ lang: "en", words: ["invoice", "invoice no"] }])).toBe("invoice no");
+    expect(startsWithWord("Invoices sent", [{ lang: "en", words: ["invoice"] }])).toBe("invoice");
+    expect(startsWithWord("Invoiced 4471", [{ lang: "en", words: ["invoice"] }])).toBeNull();
+  });
+});
+
+describe("gstBasisOf", () => {
+  it.each([
+    ["Total incl GST", "inclusive"],
+    ["Amount (GST inclusive)", "inclusive"],
+    ["Total ex GST", "exclusive"],
+    ["GST excl", "exclusive"],
+    ["Line Total", null],
+    ["Including freight", null],
+  ])("reads '%s' as %s", (text, basis) => {
+    expect(gstBasisOf(text)).toBe(basis);
   });
 });
