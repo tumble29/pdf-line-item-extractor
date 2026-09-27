@@ -1,5 +1,5 @@
 /**
- * Step 1 of the pipeline: check the upload before any PDF code runs.
+ * Checking the upload before any PDF code runs.
  *
  * These checks are cheap and need no PDF reader, so they run first. Each
  * problem gets its own refusal with its own sentence, instead of letting the

@@ -1,5 +1,5 @@
 /**
- * Step 2 of the pipeline: open the PDF.
+ * Opening the PDF.
  *
  * Opening can fail for two very different reasons, and the user must be told
  * the right one:

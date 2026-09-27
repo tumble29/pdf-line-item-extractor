@@ -1,5 +1,5 @@
 /**
- * Step 4 of the pipeline: decide what kind of page this is, before looking
+ * Deciding what kind of page this is, before looking
  * for a table.
  *
  * Some pages can't be read safely at all. It is better to refuse them with a
@@ -15,7 +15,7 @@
  *   ROTATED_TEXT   more than half of the numbers are sideways, or all of the
  *                  text is. Rows and columns would be guessed wrongly, so the
  *                  page is refused.
- *   text           a normal page. It goes on to table detection (Part 5).
+ *   text           a normal page. It goes on to table detection (table.ts).
  *
  * This is a pure function: it only looks at the page it is given, so it is easy
  * to test with hand-made pages.
@@ -40,7 +40,7 @@ export type PageClassification =
       kind: "text";
       /** The pieces to use: every piece except sideways stamps and watermarks. */
       pieces: TextPiece[];
-      /** How many images the page draws. Part 5 uses this for the "mostly scanned" case. */
+      /** How many images the page draws. index.ts uses this for the "mostly scanned" case. */
       imageCount: number;
       notes: Note[];
     };

@@ -17,11 +17,10 @@
  * Two replies don't come from this code: a body over 4.5 MB is stopped by
  * Vercel before our code runs, and a request that runs past `maxDuration` is
  * ended by Vercel. Both come back as Vercel's own plain-text pages, which the
- * web page recognises by their status (Part 8).
+ * web page will recognise by their status.
  *
  * The route writes one JSON log line when something goes wrong, with the
- * request id. It never logs document text. Route hardening (Part 7) adds tests
- * for every path.
+ * request id. It never logs document text.
  */
 import { MAX_UPLOAD_BYTES, MULTIPART_ALLOWANCE_BYTES } from "@/lib/contract/limits";
 import { ParseResult } from "@/lib/contract/schema";

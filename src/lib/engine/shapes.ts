@@ -13,11 +13,11 @@
  * between thousands. Other digit systems (for example Arabic-Indic digits)
  * come out as TEXT. It does NOT decide what the number is (1.195 could be one
  * point one nine five, or one thousand one hundred and ninety-five). That is
- * decided later, for the whole document (numbers.ts, added in Part 5).
+ * decided later, per page (numbers.ts).
  *
  * Who uses it:
  *   - classify-page.ts, to count how many numbers on a page are sideways
- *   - the table detector (Part 5), to tell number columns from text columns
+ *   - the table detector (table.ts), to tell number columns from text columns
  *
  * The rules come from an earlier prototype (kept outside this repository) that
  * found every table in the six sample files. Two changes since then: a currency

@@ -1,5 +1,5 @@
 /**
- * Step 3 of the pipeline: read one page into positioned text pieces.
+ * Reading one page into positioned text pieces.
  *
  * A PDF has no rows or columns inside it. It only has drawing instructions
  * like "draw the text '48' at this spot". pdf.js gives us those as text items,
@@ -56,7 +56,7 @@ export interface RawPage {
   drawingCount: number;
   /**
    * The page's text in stream order with all whitespace removed. It includes
-   * sideways text too. The final evidence check (Part 5) uses it as an
+   * sideways text too. The final evidence check (evidence.ts) uses it as an
    * independent copy of the page text: it is built straight from pdf.js, not
    * from our rebuilt rows.
    */
