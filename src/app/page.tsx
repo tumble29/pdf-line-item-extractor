@@ -4,7 +4,7 @@
 // own reason for every outcome. The real UI (Part B) replaces this page.
 import { useState } from "react";
 
-const MAX_BYTES = 4 * 1024 * 1024;
+import { MAX_UPLOAD_BYTES } from "@/lib/contract/limits";
 
 type Outcome =
   | { state: "idle" }
@@ -20,7 +20,7 @@ export default function Home() {
   const [outcome, setOutcome] = useState<Outcome>({ state: "idle" });
 
   async function upload(file: File) {
-    if (file.size > MAX_BYTES) {
+    if (file.size > MAX_UPLOAD_BYTES) {
       setOutcome({
         state: "message",
         text: `This file is ${formatSize(file.size)}. The limit is 4 MB, so it wasn't sent.`,
