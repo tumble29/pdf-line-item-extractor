@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test
+      - name: No generic error phrases in src
+        run: |
+          if grep -rniE "something went wrong|an error occurred" src; then
+            echo "Generic error text found. Show the real reason instead."
+            exit 1
+          fi
+      - name: No PDFs outside samples/
+        run: |
+          if git ls-files '*.pdf' | grep -vE '^samples/[^/]+[.]pdf$'; then
+            echo "Only the six sample PDFs in samples/ belong in git. Test PDFs are built in memory."
+            exit 1
+          fi
