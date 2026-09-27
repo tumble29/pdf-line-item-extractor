@@ -2,9 +2,9 @@
  * Limits for uploads and documents.
  *
  * They live in the contract folder because both sides must use the same
- * numbers: the web page checks the file size before sending it (src/app/page.tsx
- * imports MAX_UPLOAD_BYTES from here), and the server checks it again when the
- * file arrives.
+ * numbers: the web page checks the file size before sending it
+ * (src/lib/client/parse-client.ts imports MAX_UPLOAD_BYTES from here), and the
+ * server checks it again when the file arrives.
  */
 
 /**
@@ -29,12 +29,26 @@ export const MULTIPART_ALLOWANCE_BYTES = 64 * 1024;
  * The most pages we read in one file.
  *
  * A PDF's page list can point at the same page again and again, so a 2 KB file
- * can claim 100,000 pages. Reading that would produce a reply far larger than
- * Vercel allows (4.5 MB), and the user would get the platform's error instead
- * of ours. 200 pages is far more than any quote, invoice or delivery docket
- * needs.
+ * can claim 100,000 pages. Reading them all would take far longer than the
+ * route may run. 200 pages is far more than any quote, invoice or delivery
+ * docket needs.
+ *
+ * This does NOT keep the reply small: the reply grows with the number of line
+ * items, not pages. That is MAX_REPLY_BYTES's job.
  */
 export const MAX_PAGES = 200;
+
+/**
+ * The largest reply we send: 4 MB.
+ *
+ * Why: Vercel also stops a reply over 4.5 MB, and sends its own plain-text
+ * error page in its place, which the web page can't explain. Each line item
+ * carries its evidence, so 200 pages of 36 lines already give a 4.8 MB reply.
+ * The route measures the reply before sending it, and refuses a larger one as
+ * TOO_MANY_LINES, with a sentence that says how to split the file
+ * (src/lib/server/reply-size.ts).
+ */
+export const MAX_REPLY_BYTES = 4 * 1024 * 1024;
 
 /**
  * How far into the file we look for the "%PDF-" marker that every PDF starts

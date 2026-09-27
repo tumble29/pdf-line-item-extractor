@@ -70,6 +70,11 @@ const SAMPLES: { [Code in RefusalCode]: MessageContexts[Code][] } = {
   ENCRYPTED: [{}],
   CORRUPT_FILE: [{}],
   TOO_MANY_PAGES: [{ pageCount: 350, limit: 200 }],
+  TOO_MANY_LINES: [
+    { itemCount: 7200, leftOutCount: 0, pagesPerFile: 150 },
+    { itemCount: 7200, leftOutCount: 1, pagesPerFile: 1 },
+    { itemCount: 0, leftOutCount: 11000, pagesPerFile: null },
+  ],
 
   NO_TEXT_LAYER: [
     { page: 3, form: "scan" },

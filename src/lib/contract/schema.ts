@@ -286,8 +286,11 @@ export const Evidence = z.strictObject({
 export type Evidence = z.infer<typeof Evidence>;
 
 /**
- * Refusals that stop us reading the file at all. These come back as a 4xx
- * `Problem`, not as a `ParseResult`, because there is nothing else to show.
+ * Refusals of the whole file. These come back as a 4xx `Problem`, not as a
+ * `ParseResult`. Most of them stop us before any page is read (no file, too
+ * large, not a PDF, protected, damaged, too many pages), so there is nothing
+ * else to show. TOO_MANY_LINES comes after every page was read: the result
+ * is too large to send back in one reply.
  */
 export const DocumentCode = z.enum([
   "NO_FILE",
@@ -297,6 +300,7 @@ export const DocumentCode = z.enum([
   "ENCRYPTED",
   "CORRUPT_FILE",
   "TOO_MANY_PAGES",
+  "TOO_MANY_LINES",
 ]);
 export type DocumentCode = z.infer<typeof DocumentCode>;
 
@@ -354,6 +358,7 @@ export const REFUSAL_SCOPES: { [Code in RefusalCode]: readonly RefusalScope[] } 
   ENCRYPTED: ["document"],
   CORRUPT_FILE: ["document"],
   TOO_MANY_PAGES: ["document"],
+  TOO_MANY_LINES: ["document"],
   NO_TEXT_LAYER: ["page"],
   GARBLED_TEXT: ["page"],
   ROTATED_TEXT: ["page"],
@@ -395,7 +400,7 @@ export const PAGE_REFUSAL_STATUS = {
  *   413  the file is too large
  *   415  the file is not the type we read
  *   422  the file is the right type, but we can't read its contents (or it has
- *        more pages than we read)
+ *        more pages, or more line items, than we can read or send back)
  */
 export const DOCUMENT_HTTP_STATUS: Record<DocumentCode, number> = {
   NO_FILE: 400,
@@ -405,6 +410,7 @@ export const DOCUMENT_HTTP_STATUS: Record<DocumentCode, number> = {
   ENCRYPTED: 422,
   CORRUPT_FILE: 422,
   TOO_MANY_PAGES: 422,
+  TOO_MANY_LINES: 422,
 };
 
 /** The HTTP status when our own code fails. It is never used for a problem with the user's file. */

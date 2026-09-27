@@ -40,12 +40,14 @@ type RowCode =
   | "EVIDENCE_CHECK_FAILED";
 type RowInput = Extract<RefusalInput, { code: RowCode }>;
 
-/** A refusal of the whole file, before anything could be read. */
+/** A refusal of the whole file, sent as a 4xx Problem instead of a result. */
 export type DocumentRefusal = Refusal & { code: DocumentCode; scope: "document" };
 
 /**
  * A refusal of the whole file: no file, an empty file, too large, not a PDF,
- * password-protected, or damaged. The route sends it as a 4xx Problem.
+ * password-protected, damaged, or too many pages (all before the pages are
+ * read), or too many lines to send back (after they are read). The route
+ * sends it as a 4xx Problem.
  *
  * Example:
  *   documentRefusal({ code: "ENCRYPTED" })

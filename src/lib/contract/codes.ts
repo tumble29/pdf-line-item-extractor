@@ -65,6 +65,11 @@ function countWord(n: number): string {
   return words[n] ?? String(n);
 }
 
+/** A count that can be large, with its word: "1 line", "7,200 line items". */
+function bigCount(n: number, word: string): string {
+  return `${n.toLocaleString("en")} ${n === 1 ? word : `${word}s`}`;
+}
+
 /** Joins a list the way people write it: "a", "a and b", "a, b and c". */
 export function listText(items: readonly string[]): string {
   if (items.length <= 1) return items.join("");
@@ -154,6 +159,14 @@ export interface MessageContexts {
   CORRUPT_FILE: NoContext;
   /** `pageCount` is how many pages the file has; `limit` is the most we read. */
   TOO_MANY_PAGES: { pageCount: number; limit: number };
+  /**
+   * The reply would be too large to send. `itemCount` is how many line items
+   * we read, and `leftOutCount` how many lines we left out (each refused line
+   * is in the reply too, with its reason). `pagesPerFile` is about how many
+   * pages each part may have for its reply to fit, or null when the file has
+   * one page only, or even one page is too many.
+   */
+  TOO_MANY_LINES: { itemCount: number; leftOutCount: number; pagesPerFile: number | null };
 
   /**
    * `form` says what the page has instead of readable text:
@@ -296,6 +309,12 @@ export const REFUSAL_MESSAGES: { [Code in RefusalCode]: (context: MessageContext
   TOO_MANY_PAGES: ({ pageCount, limit }) =>
     `This file has ${pageCount} pages. We read files of up to ${limit} pages. ` +
     "Split it into smaller files and try again.",
+  TOO_MANY_LINES: ({ itemCount, leftOutCount, pagesPerFile }) =>
+    `This file has more lines than we can send back in one reply (${bigCount(itemCount, "line item")} read` +
+    (leftOutCount > 0 ? `, and ${bigCount(leftOutCount, "line")} left out, each with its reason). ` : "). ") +
+    (pagesPerFile === null
+      ? "Split it into smaller files and try again."
+      : `Split it into files of about ${pagesPerFile} ${pagesPerFile === 1 ? "page" : "pages"} each and try again.`),
 
   // --- One page ------------------------------------------------------------
   NO_TEXT_LAYER: ({ page, form }) => {
@@ -488,6 +507,7 @@ export const DOCUMENT_PROBLEM_TITLES: Record<DocumentCode, string> = {
   ENCRYPTED: "Protected PDF",
   CORRUPT_FILE: "Damaged PDF",
   TOO_MANY_PAGES: "Too many pages",
+  TOO_MANY_LINES: "Too many lines",
 };
 
 /**
