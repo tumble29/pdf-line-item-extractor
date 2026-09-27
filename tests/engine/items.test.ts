@@ -553,12 +553,15 @@ describe("buildItems: cells that can't be read", () => {
     expect(result.ambiguousNumbers).toBe(false);
   });
 
-  it("sets ambiguousNumbers even when another cell of the row is named in the refusal", () => {
+  it("doesn't set ambiguousNumbers when the refusal names another cell of the row", () => {
+    // "1.200" has two readings, but the refusal names "two" (further left).
+    // The person sees no AMBIGUOUS_NUMBER_FORMAT refusal, so the number
+    // format must not say that a number had two readings.
     const result = items(HEADERS, withRow(1, ["2", "Wire staple box 500", "two", "kg", "1.200", "$9.00"]), ROLES, {
       conventions: CONVENTIONS,
     });
     expect(result.refusals[0].code).toBe("UNPARSEABLE_NUMBER");
-    expect(result.ambiguousNumbers).toBe(true);
+    expect(result.ambiguousNumbers).toBe(false);
   });
 
   it("refuses every number when the document mixes formats and no convention is left", () => {
@@ -824,7 +827,7 @@ describe("buildItems: totals rows inside the body", () => {
     const table = makeTable(HEADERS, [...ROWS, ["", "Total", "", "", "", "$126.00"]]);
     const result = buildItems(1, table, decisionFor(table, ROLES), conventionsOf([table]));
     expectValid(result);
-    expect(result.totalsRows).toEqual([table.body[3].row]);
+    expect(result.totalsRows).toEqual([{ row: table.body[3].row, amount: table.body[3].cells[5], hasTotalColumn: true }]);
     expect(result.items).toHaveLength(3);
     expect(result.refusals).toEqual([]);
     expect(result.notes).toContainEqual(NOTES.totalsRowSkipped(1, "Total $126.00"));

@@ -100,6 +100,29 @@ export function rowRefusal(input: RowInput, rowIndex: number, evidence: Evidence
   };
 }
 
+/** The codes about a printed total or a check against it, and their facts. */
+type TotalsCode = "TOTALS_DISAGREE" | "TOTALS_UNVERIFIABLE" | "AMBIGUOUS_NUMBER_FORMAT" | "EVIDENCE_CHECK_FAILED";
+type TotalsInput = Extract<RefusalInput, { code: TotalsCode }>;
+
+/**
+ * A refusal about a printed total, or about a check of the lines against it.
+ * `name` finishes the id: the check's name for TOTALS_DISAGREE and
+ * TOTALS_UNVERIFIABLE ("totals-lines_vs_total"), or the total's place for a
+ * total that has two readings or fails the evidence check
+ * ("totals-p1-r9-AMBIGUOUS_NUMBER_FORMAT"). `page` is the page the total is
+ * printed on, when there is one.
+ */
+export function totalsRefusal(input: TotalsInput, name: string, evidence: Evidence[], page?: number): Refusal {
+  return {
+    id: `totals-${name}`,
+    code: input.code,
+    scope: "totals",
+    ...(page !== undefined ? { page } : {}),
+    message: refusalMessage(input),
+    evidence,
+  };
+}
+
 /**
  * A finding about the whole document that is reported next to the items,
  * inside a normal result (for example "no line items found").

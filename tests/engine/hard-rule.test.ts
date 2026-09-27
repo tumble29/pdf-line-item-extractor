@@ -2,7 +2,7 @@
  * The brief's hard rule, checked over every PDF the tests can build and over
  * the six samples: never output a number without its source.
  *
- * For every file, and every field of every line item:
+ * For every file, every field of every line item, and every printed total:
  *   - a field with a value has a span, and `sourceText.slice(span)` is exactly
  *     its raw text, so the number and its quoted source always agree
  *   - the evidence gate had nothing to refuse. The gate is a safety net: on
@@ -24,17 +24,22 @@ import { parsePdf } from "@/lib/engine";
 
 import {
   brokenLastPage,
+  conflictingNotes,
   docket,
   imageOnlyMiddle,
   mismatchRow,
   multiPage,
   numbersOnlyRow,
+  oneCellTotal,
   ownerOnly,
   rotatedStamp,
   shapesOnly,
   shiftedColumns,
   threePages,
   titledPages,
+  totalAfterScan,
+  totalGap,
+  unknownLabelTotal,
   unparseableCell,
 } from "../fixtures/build";
 import { LANGUAGE_FIXTURES } from "../fixtures/languages";
@@ -54,6 +59,12 @@ const BUILDERS: Record<string, () => Promise<Uint8Array>> = {
   mismatchRow,
   unparseableCell,
   numbersOnlyRow,
+  conflictingNotes,
+  oneCellTotal,
+  totalGap,
+  totalAfterScan,
+  unknownLabelTotalMatching: () => unknownLabelTotal({ matches: true }),
+  unknownLabelTotalDiffering: () => unknownLabelTotal({ matches: false }),
   ...Object.fromEntries(Object.entries(LANGUAGE_FIXTURES).map(([name, fixture]) => [name, fixture.build])),
 };
 
@@ -73,6 +84,11 @@ async function expectHardRule(bytes: Uint8Array): Promise<void> {
       if (field.value !== undefined) expect(field.span, `${item.id} ${role} has a value but no span`).toBeDefined();
       if (field.span) expect(item.sourceText.slice(field.span[0], field.span[1]), `${item.id} ${role}`).toBe(field.raw);
     }
+  }
+  for (const total of result.totals.stated) {
+    const { span, raw, value } = total.amount;
+    expect(value, `the total on page ${total.page} has no value`).toBeDefined();
+    expect(span && total.sourceText.slice(span[0], span[1]), `the total on page ${total.page}`).toBe(raw);
   }
   expect(result.refusals.filter((refusal) => refusal.code === "EVIDENCE_CHECK_FAILED")).toEqual([]);
 

@@ -8,14 +8,19 @@
  * whitespace character removed, joined with nothing between them.
  *
  * First checkField alone, one rule at a time, each with a case that triggers
- * it and a close case that must not. Then evidenceGate over several items.
+ * it and a close case that must not. Then evidenceGate over several items,
+ * and totalsGate over printed totals.
  * All text is invented.
  */
 import { describe, expect, it } from "vitest";
 
-import { Field, LineItem, Refusal, type Role, type Span } from "@/lib/contract/schema";
-import { checkField, evidenceGate } from "@/lib/engine/evidence";
+import { Field, LineItem, Refusal, StatedTotal, type Role, type Span } from "@/lib/contract/schema";
+import { checkField, evidenceGate, totalsGate } from "@/lib/engine/evidence";
 import type { Convention } from "@/lib/engine/numbers";
+import { buildRows } from "@/lib/engine/rows";
+import { readTotalRow, type TotalsCandidate } from "@/lib/engine/totals";
+
+import { piece } from "../fixtures/items";
 
 /** Finds `part` inside `text` and returns its [start, end) span. Pass `from` to skip an earlier match. */
 function spanOf(text: string, part: string, from = 0): Span {
@@ -358,5 +363,53 @@ describe("evidenceGate", () => {
     const copy = structuredClone(items);
     evidenceGate(items, streams, () => EN);
     expect(items).toEqual(copy);
+  });
+});
+
+describe("totalsGate", () => {
+  /** A printed total read from a real row, the way totals.ts reads it. */
+  function total(text = "Total: $413.50", page = 1): TotalsCandidate {
+    const [row] = buildRows([piece(text, 380, 400)]);
+    const candidate = readTotalRow(page, row, EN);
+    if (!candidate) throw new Error(`"${text}" was not read as a total`);
+    return candidate;
+  }
+  const totalStreams = new Map([
+    [1, streamOf(["Total:", "$413.50"])],
+    [2, streamOf(["Total:", "$99.00"])],
+  ]);
+
+  it("keeps a printed total that is exactly its text on its page, and it fits the contract", () => {
+    const candidate = total();
+    const gate = totalsGate([candidate], totalStreams, () => EN);
+    expect(gate).toEqual({ candidates: [candidate], rejected: [], refusals: [] });
+    const stated = { label: "total", labelKnown: true, page: 1, sourceText: candidate.sourceText, amount: candidate.amount };
+    expect(StatedTotal.safeParse(stated).success).toBe(true);
+  });
+
+  it.each([
+    ["its value was changed", (candidate: TotalsCandidate) => ({ ...candidate, amount: { ...candidate.amount, value: 99 } })],
+    ["its span is shifted by one", (candidate: TotalsCandidate) => ({ ...candidate, amount: { ...candidate.amount, span: [8, 15] as Span } })],
+    ["it cites a page it is not on", (candidate: TotalsCandidate) => ({ ...candidate, page: 2 })],
+    ["its page has no text", (candidate: TotalsCandidate) => ({ ...candidate, page: 3 })],
+  ])("refuses a printed total when %s", (_name, corrupt) => {
+    const bad = corrupt(total());
+    const gate = totalsGate([bad], totalStreams, () => EN);
+    expect(gate.candidates).toEqual([]);
+    expect(gate.rejected).toEqual([bad]);
+    expect(gate.refusals).toHaveLength(1);
+    const [refusal] = gate.refusals;
+    expect(refusal).toMatchObject({ id: `totals-p${bad.page}-r0-EVIDENCE_CHECK_FAILED`, code: "EVIDENCE_CHECK_FAILED", scope: "totals" });
+    expect(Refusal.safeParse(refusal).success).toBe(true);
+  });
+
+  it("lets a total with two readings through; totals.ts refuses it as ambiguous", () => {
+    const [row] = buildRows([piece("Total: 1.200", 380, 400)]);
+    const ambiguous = readTotalRow(1, row, [
+      { decimal: ".", grouping: "" },
+      { decimal: ",", grouping: "." },
+    ]);
+    if (!ambiguous) throw new Error("not read");
+    expect(totalsGate([ambiguous], new Map([[1, streamOf(["Total: 1.200"])]]), () => EN).candidates).toEqual([ambiguous]);
   });
 });

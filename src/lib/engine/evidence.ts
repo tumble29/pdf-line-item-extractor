@@ -26,13 +26,18 @@
  * EVIDENCE_CHECK_FAILED row refusal that quotes its row. It is never dropped
  * silently, and it never affects the other items.
  *
+ * The printed totals go through the same checks (totalsGate), so a total
+ * that can't be proved is never used to check the lines.
+ *
  * How to read it: checkField holds the checks for one field, in the order
- * listed on EvidenceProblem. evidenceGate runs it over every item.
+ * listed on EvidenceProblem. evidenceGate runs it over every item, and
+ * totalsGate over every printed total.
  */
 import { MONEY_ROLES, type Field, type LineItem, type Refusal, type Role } from "@/lib/contract/schema";
 
 import { analyseNumber, currencyCode, readNumber, type Convention } from "./numbers";
-import { rowRefusal } from "./refusals";
+import { rowRefusal, totalsRefusal } from "./refusals";
+import type { TotalsCandidate } from "./totals";
 
 /** Why a field failed the gate. The checks run in this order, and the first failure is returned. */
 export type EvidenceProblem =
@@ -65,7 +70,7 @@ function wordsOnPage(sourceText: string, streamText: string): boolean {
 
 /**
  * Checks one field that has a value. `role` is its column role, or
- * "statedTotal" for a printed total (read by the totals step, still to come).
+ * "statedTotal" for a printed total (a figure totals.ts read below a table).
  * `conventions` are the number conventions of the field's page. Returns null
  * when the field passes, or the first problem found.
  *
@@ -109,6 +114,52 @@ export function checkField(
 export interface GateResult {
   items: LineItem[];
   refusals: Refusal[];
+}
+
+/** The printed totals that passed the gate, the ones that didn't, and a refusal for each one that didn't. */
+export interface TotalsGateResult {
+  candidates: TotalsCandidate[];
+  rejected: TotalsCandidate[];
+  refusals: Refusal[];
+}
+
+/**
+ * Runs the same checks on every printed total (totals.ts) that has a value:
+ * its span slices back to its raw text, its row's words are on its page, and
+ * reading the raw text again gives the same value and currency. A total that
+ * fails is removed and replaced by a visible EVIDENCE_CHECK_FAILED totals
+ * refusal that quotes its row, so it can never be used in a check.
+ *
+ * A total whose amount has two readings has no value to prove; it passes
+ * through, and totals.ts refuses it as AMBIGUOUS_NUMBER_FORMAT.
+ */
+export function totalsGate(
+  candidates: readonly TotalsCandidate[],
+  streamTexts: ReadonlyMap<number, string>,
+  pageConventions: (page: number) => readonly Convention[],
+): TotalsGateResult {
+  const result: TotalsGateResult = { candidates: [], rejected: [], refusals: [] };
+  for (const candidate of candidates) {
+    const streamText = streamTexts.get(candidate.page);
+    const problem =
+      streamText === undefined
+        ? "not-on-page"
+        : checkField("statedTotal", candidate.amount, candidate.sourceText, streamText, pageConventions(candidate.page));
+    if (problem === null) {
+      result.candidates.push(candidate);
+      continue;
+    }
+    result.rejected.push(candidate);
+    result.refusals.push(
+      totalsRefusal(
+        { code: "EVIDENCE_CHECK_FAILED", page: candidate.page, raw: candidate.amount.raw },
+        `p${candidate.page}-r${candidate.rowIndex}-EVIDENCE_CHECK_FAILED`,
+        [{ page: candidate.page, sourceText: candidate.sourceText }],
+        candidate.page,
+      ),
+    );
+  }
+  return result;
 }
 
 /**

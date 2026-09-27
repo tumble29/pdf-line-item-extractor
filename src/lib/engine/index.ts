@@ -6,8 +6,7 @@
  * The brief asks for an API (this engine plus the route in src/app/api/parse)
  * and a web page. This file joins the steps of the engine together. Each step
  * lives in its own file and is tested on its own; this file only decides the
- * order and passes the results on. The printed totals, and the checks against
- * them, are not read yet.
+ * order and passes the results on.
  *
  * The pipeline
  * ------------
@@ -18,13 +17,20 @@
  *               build its rows (rows.ts) and find its table (table.ts)
  *   pass 2      per page: decide the page's number format from its table's
  *               numbers (numbers.ts), read the title (page-title.ts), decide
- *               the column roles (roles.ts) and build the line items (items.ts)
- *   gate        check every number of every item against its row and its
- *               page once more (evidence.ts); an item that fails is replaced
- *               by a refusal
- *   assemble    put pages, items and refusals together in the contract's
- *               order, set each page's status, and report the number format
- *               the pages share
+ *               the column roles (roles.ts), build the line items (items.ts),
+ *               and find the printed totals: the lines below the table and
+ *               the "Total" lines moved out of it (totals.ts)
+ *   gate        check every number of every item, and every printed total,
+ *               against its row and its page once more (evidence.ts); one
+ *               that fails is replaced by a refusal, and each page's status
+ *               is set again
+ *   document    look for counts that contradict each other in the text around
+ *               the tables (contradictions.ts), and check the lines that
+ *               passed the gate against the printed totals that passed it
+ *               (totals.ts)
+ *   assemble    put pages, items, refusals and totals together in the
+ *               contract's order, add the totals notes to their pages, and
+ *               report the number format the pages share
  *
  * Each page is read in its own number format and never borrows one from
  * another page (see numbers.ts for why).
@@ -32,7 +38,7 @@
  * How to read this file: the types passed between the steps come first, then
  * pass 1 (`processPage`), the page's number format (`pageConventions`), pass 2
  * (`analysePage`), the time limits, and at the end `parsePdf` and the helpers
- * that put the result together.
+ * that put the result together (`withGateResults`, `assemble`).
  *
  * Containment
  * -----------
@@ -76,7 +82,8 @@ import {
 } from "@/lib/contract/schema";
 
 import { classifyPage, type PageClassification } from "./classify-page";
-import { evidenceGate } from "./evidence";
+import { findConflictingFigures } from "./contradictions";
+import { evidenceGate, totalsGate } from "./evidence";
 import { settlePage } from "./isolate";
 import { buildItems } from "./items";
 import {
@@ -97,6 +104,7 @@ import { findingRefusal, pageRefusal, type DocumentRefusal } from "./refusals";
 import { decideRoles } from "./roles";
 import { buildRows, type Row } from "./rows";
 import { findTable, type PageLayout, type Table } from "./table";
+import { checkTotals, findTotalsCandidates, type TotalsCandidate, type TotalsResult } from "./totals";
 
 // ---------------------------------------------------------------------------
 // Types passed between the stages
@@ -120,7 +128,7 @@ export interface PageFindings {
   pieceCount: number;
 }
 
-/** What pass 2 produces for one page: its report, its items and its refusals. */
+/** What pass 2 produces for one page: its report, its items, its refusals, its printed totals and the text around its table. */
 export interface PageAnalysis {
   report: PageReport;
   items: LineItem[];
@@ -133,6 +141,19 @@ export interface PageAnalysis {
    * page's values again with them. Every convention for a page with no table.
    */
   conventions: readonly Convention[];
+  /** The printed totals found on this page (totals.ts), before the evidence gate. */
+  totals: TotalsCandidate[];
+  /** How many lines on this page look like a total but had an amount we couldn't read. */
+  unreadTotals: number;
+  /**
+   * The text around the table, for the contradiction scan: the rows above
+   * the header and below the table, except the rows of another table and the
+   * printed totals. On a page with no table (NO_TABLE_FOUND), every row
+   * except carried-forward lines. Empty on a page we didn't read, and on a
+   * returns or credit page, whose counts are about goods going back and can't
+   * be compared with the sale.
+   */
+  outside: Row[];
 }
 
 /**
@@ -300,7 +321,7 @@ function statusOf(current: PageReport["status"], refusals: readonly Refusal[], i
  */
 function analysePage(findings: PageFindings): PageAnalysis {
   const { page, classification, layout } = findings;
-  const none = { items: [], ambiguousNumbers: false, conventions: CONVENTIONS };
+  const none = { items: [], ambiguousNumbers: false, conventions: CONVENTIONS, totals: [], unreadTotals: 0, outside: [] };
 
   if (classification.kind === "blank") {
     // Not a refusal: there was nothing to read.
@@ -323,8 +344,11 @@ function analysePage(findings: PageFindings): PageAnalysis {
     }
     const evidence = asEvidence(page, layout.rows.slice(0, NO_TABLE_EVIDENCE_ROWS));
     const refusal = pageRefusal({ code: "NO_TABLE_FOUND", page }, evidence);
-    return { ...none, report: report(page, "refused", uniqueNotes([...classification.notes, ...layout.notes])), refusals: [refusal] };
+    const notes = uniqueNotes([...classification.notes, ...layout.notes]);
+    // With no table, every row of the page is text around the (missing) table.
+    return { ...none, report: report(page, "refused", notes), refusals: [refusal], outside: layout.above };
   }
+  const aroundTable = [...layout.above, ...layout.below].filter((row) => !layout.otherTableRows.includes(row));
 
   const title = readPageTitle(layout.above);
   if (title.creditTitle !== null) {
@@ -333,6 +357,9 @@ function analysePage(findings: PageFindings): PageAnalysis {
     const quoted = title.creditRow ? [title.creditRow, ...tableRows(table)] : tableRows(table);
     const refusal = pageRefusal({ code: "CREDIT_OR_RETURN_PAGE", page, title: title.creditTitle }, asEvidence(page, quoted));
     const pageReport = { ...report(page, "refused", uniqueNotes([...classification.notes, ...layout.notes])), titleLines: title.titleLines };
+    // Its printed totals are not read either: they may be money going back.
+    // Its counts are about goods going back too, so they are not compared
+    // with the sale's counts (`outside` stays empty).
     return { ...none, report: pageReport, refusals: [refusal] };
   }
 
@@ -340,14 +367,17 @@ function analysePage(findings: PageFindings): PageAnalysis {
   const decision = decideRoles(table, conventions, page);
   const built =
     decision.refusal?.code === "AMBIGUOUS_COLUMNS"
-      ? { items: [], refusals: [], notes: [], ambiguousNumbers: false }
+      ? { items: [], refusals: [], notes: [], ambiguousNumbers: false, totalsRows: [] }
       : buildItems(page, table, decision, conventions);
+  const totals = findTotalsCandidates(page, layout.below, built.totalsRows, layout.otherTableRows, conventions);
+  const totalsRowIndexes = new Set(totals.candidates.map((candidate) => candidate.rowIndex));
 
   const notes = uniqueNotes([
     ...classification.notes,
     ...layout.notes,
     ...decision.notes,
     ...built.notes,
+    ...totals.notes,
     ...(title.summaryTitle !== null ? [NOTES.summaryPage(page, title.summaryTitle)] : []),
   ]);
   // The page refusal (AMBIGUOUS_COLUMNS or COLUMN_MEANING_UNKNOWN) comes
@@ -361,7 +391,16 @@ function analysePage(findings: PageFindings): PageAnalysis {
     columns: decision.columns,
     notes,
   };
-  return { report: pageReport, items: built.items, refusals, ambiguousNumbers: built.ambiguousNumbers, conventions };
+  return {
+    report: pageReport,
+    items: built.items,
+    refusals,
+    ambiguousNumbers: built.ambiguousNumbers,
+    conventions,
+    totals: totals.candidates,
+    unreadTotals: totals.unread,
+    outside: aroundTable.filter((row) => !totalsRowIndexes.has(row.index)),
+  };
 }
 
 /** The parts used in production. */
@@ -415,6 +454,9 @@ function failedPage(page: number, cause: "error" | "timeout" | "budget"): PageAn
     refusals: [pageRefusal({ code: "PAGE_LOAD_FAILED", page, cause })],
     ambiguousNumbers: false,
     conventions: CONVENTIONS,
+    totals: [],
+    unreadTotals: 0,
+    outside: [],
   };
 }
 
@@ -496,15 +538,44 @@ export async function parsePdf(
     // stream text and number conventions. It runs in production, not only in
     // tests.
     const streamTexts = new Map(found.map((findings) => [findings.page, findings.streamText]));
-    const checked = withGateResults(analyses, streamTexts);
+    const conventionsByPage = new Map(analyses.map((analysis) => [analysis.report.page, analysis.conventions]));
+    const conventionsOf = (page: number) => conventionsByPage.get(page) ?? CONVENTIONS;
+    const checked = withGateResults(analyses, streamTexts, conventionsOf);
+    const gatedTotals = totalsGate(
+      checked.flatMap((analysis) => analysis.totals),
+      streamTexts,
+      conventionsOf,
+    );
+
+    // The whole-document steps: the counts that contradict each other in the
+    // text around the tables, then the lines that passed the gate against
+    // the printed totals that passed it.
+    const conflicts = findConflictingFigures(checked.map((analysis) => ({ page: analysis.report.page, rows: analysis.outside })));
+    const noTablePages = new Set(
+      checked.flatMap((analysis) => analysis.refusals.filter((refusal) => refusal.code === "NO_TABLE_FOUND").map(() => analysis.report.page)),
+    );
+    const totals = checkTotals({
+      candidates: gatedTotals.candidates,
+      rejected: gatedTotals.rejected,
+      unreadTotals: checked.reduce((count, analysis) => count + analysis.unreadTotals, 0),
+      noTablePages,
+      pages: checked.map((analysis) => analysis.report),
+      items: checked.flatMap((analysis) => analysis.items),
+      conventionsOf,
+    });
 
     // The format the pages share. A page with no table allows every
     // convention, so it doesn't change the result.
     const numberFormat = numberFormatOf(
       sharedConventions(checked.map((analysis) => analysis.conventions)),
-      checked.some((analysis) => analysis.ambiguousNumbers),
+      checked.some((analysis) => analysis.ambiguousNumbers) || totals.ambiguous,
     );
-    return { kind: "read", result: assemble(doc.numPages, numberFormat, checked), diagnostics };
+    const result = assemble(doc.numPages, numberFormat, checked, {
+      conflicts,
+      totals,
+      totalsRefusals: [...gatedTotals.refusals, ...totals.refusals],
+    });
+    return { kind: "read", result, diagnostics };
   } finally {
     // Close the document and free its memory. pdf.js 6 closes a document
     // through its loading task (there is no doc.destroy()). A failure here
@@ -519,12 +590,15 @@ export async function parsePdf(
  * row order (the page refusal stays first). Then each page's item count and
  * status are set again, because a page can lose items here.
  */
-function withGateResults(analyses: readonly PageAnalysis[], streamTexts: ReadonlyMap<number, string>): PageAnalysis[] {
-  const conventionsByPage = new Map(analyses.map((analysis) => [analysis.report.page, analysis.conventions]));
+function withGateResults(
+  analyses: readonly PageAnalysis[],
+  streamTexts: ReadonlyMap<number, string>,
+  conventionsOf: (page: number) => readonly Convention[],
+): PageAnalysis[] {
   const gate = evidenceGate(
     analyses.flatMap((analysis) => analysis.items),
     streamTexts,
-    (page) => conventionsByPage.get(page) ?? CONVENTIONS,
+    conventionsOf,
   );
   return analyses.map((analysis) => {
     const { page } = analysis.report;
@@ -554,19 +628,34 @@ function orderRefusals(refusals: readonly Refusal[]): Refusal[] {
   return [...refusals].sort((a, b) => rank(a) - rank(b));
 }
 
+/** What the whole-document steps found, for `assemble`. */
+interface DocumentFindings {
+  /** CONFLICTING_FIGURES refusals, one per word. */
+  conflicts: Refusal[];
+  /** The totals check, its stated totals and its notes. */
+  totals: TotalsResult;
+  /** Every totals refusal: the printed totals the gate rejected, then the check's own. */
+  totalsRefusals: Refusal[];
+}
+
 /**
- * Puts the per-page analyses together in the order the contract requires:
- * pages in page order, items by page then row, and refusals as document
- * findings first, then each page's refusals in page order.
+ * Puts the per-page analyses and the document findings together in the order
+ * the contract requires: pages in page order, items by page then row, and
+ * refusals as document findings first, then each page's refusals in page
+ * order, then the totals refusals. The totals notes join their pages' notes.
  */
-function assemble(pageCount: number, numberFormat: NumberFormat, analyses: PageAnalysis[]): EngineResult {
-  const pages = analyses.map((analysis) => ({ ...analysis.report, itemCount: analysis.items.length }));
+function assemble(pageCount: number, numberFormat: NumberFormat, analyses: PageAnalysis[], found: DocumentFindings): EngineResult {
+  const pages = analyses.map((analysis) => ({
+    ...analysis.report,
+    itemCount: analysis.items.length,
+    notes: uniqueNotes([...analysis.report.notes, ...(found.totals.notes.get(analysis.report.page) ?? [])]),
+  }));
   const items = analyses.flatMap((analysis) => analysis.items);
   const pageRefusals = analyses.flatMap((analysis) => analysis.refusals);
 
   // When nothing was found and nothing was refused, say so plainly, instead of
   // returning an empty list the user might read as "the file has no lines".
-  const findings: Refusal[] = [];
+  const findings: Refusal[] = [...found.conflicts];
   if (items.length === 0 && pageRefusals.length === 0) {
     findings.push(findingRefusal({ code: "NO_LINE_ITEMS_FOUND" }));
   }
@@ -576,8 +665,7 @@ function assemble(pageCount: number, numberFormat: NumberFormat, analyses: PageA
     numberFormat,
     pages,
     items,
-    refusals: [...findings, ...pageRefusals],
-    // The printed totals are not read yet.
-    totals: { stated: [], gstBasis: "unstated", checks: [] },
+    refusals: [...findings, ...pageRefusals, ...found.totalsRefusals],
+    totals: { stated: found.totals.stated, gstBasis: found.totals.gstBasis, checks: found.totals.checks },
   };
 }

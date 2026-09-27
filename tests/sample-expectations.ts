@@ -23,10 +23,7 @@
  * way (see `plainValue`), so a reader bug that returns a wrong value can't
  * pass unnoticed.
  *
- * Not checked yet: the printed totals and CONFLICTING_FIGURES. The totals step
- * is not built yet, so `totals` is left out of every entry, and
- * `documentRefusals` will then gain CONFLICTING_FIGURES on KBS-10262. That
- * step will also add one info note on KBS-10255 (a total label with no amount).
+ * The totals: which check ran and its outcome, and the totals refusals.
  */
 import type { NumberFormat, PageStatus, RefusalCode, RefusalScope, Role, RoleSource, TotalsCheck } from "@/lib/contract/schema";
 import type { EngineResult } from "@/lib/engine";
@@ -59,7 +56,7 @@ export interface ItemExpectation {
   otherCellKeys: string[];
 }
 
-/** The totals, checked from Part 6 on. */
+/** The totals check and the totals refusals. */
 export interface TotalsExpectation {
   /** The checks that ran, by name and outcome. */
   checks: Pick<TotalsCheck, "name" | "outcome">[];
@@ -87,8 +84,7 @@ export interface FileExpectation {
   lineTotalSum?: number;
   /** The price unit (`per`) of each item's unit price, in item order, when the file prints them. */
   pricePers?: string[];
-  /** Undefined until the totals step reads the totals: then nothing about totals is compared. */
-  totals?: TotalsExpectation;
+  totals: TotalsExpectation;
 }
 
 // ---------------------------------------------------------------------------
@@ -96,6 +92,12 @@ export interface FileExpectation {
 // ---------------------------------------------------------------------------
 
 const NO_NOTES = { info: 0, warning: 0 };
+
+/** No printed total was found, so the check didn't run and nothing was refused. */
+const NOT_CHECKED: TotalsExpectation = { checks: [{ name: "lines_vs_total", outcome: "not_checked" }], refusals: [] };
+
+/** The lines were checked against the printed total and matched. */
+const TOTAL_PASSES: TotalsExpectation = { checks: [{ name: "lines_vs_total", outcome: "pass" }], refusals: [] };
 
 /** A normal page: extracted, with this many items, no refusals and no notes. */
 function extracted(itemCount: number, notes = NO_NOTES): PageExpectation {
@@ -141,6 +143,7 @@ export const SAMPLE_EXPECTATIONS: Record<string, FileExpectation> = {
     numberFormat: DOT_DECIMALS_COMMA_GROUPING,
     // The lines add up to the printed total, $2,630.00.
     lineTotalSum: 2630,
+    totals: TOTAL_PASSES,
   },
   // A picture of a page, with no text layer: refused, so no NO_LINE_ITEMS_FOUND.
   "KBS-10241.pdf": {
@@ -149,12 +152,14 @@ export const SAMPLE_EXPECTATIONS: Record<string, FileExpectation> = {
     items: { required: [], forbidden: [], everyUnitPriceHasPer: false, otherCellKeys: [] },
     columns: {},
     numberFormat: { decimal: null, grouping: null, settled: true },
+    totals: NOT_CHECKED,
   },
   // No line total; prices end in "/unit"; a weight column we don't read.
   // Notes: the quantity role from the heading only (info), the weight column
-  // not read (info), and its mixed "total" wording (warning).
+  // not read (info), its mixed "total" wording (warning), and a total label
+  // with no amount below the table (info).
   "KBS-10255.pdf": {
-    pages: [extracted(4, { info: 2, warning: 1 })],
+    pages: [extracted(4, { info: 3, warning: 1 })],
     documentRefusals: [],
     items: {
       required: ["itemNo", "description", "quantity", "unitPrice"],
@@ -165,18 +170,20 @@ export const SAMPLE_EXPECTATIONS: Record<string, FileExpectation> = {
     columns: { item: "both", description: "both", qty: "header", weight: null, unitPrice: "both" },
     numberFormat: DOT_DECIMALS,
     pricePers: ["bag", "ea", "ea", "bundle"],
+    totals: NOT_CHECKED,
   },
-  // The totals step adds CONFLICTING_FIGURES (document scope) here.
+  // The notes above and below the table give two different pallet counts.
   "KBS-10262.pdf": {
     pages: [extracted(3)],
-    documentRefusals: [],
+    documentRefusals: [{ code: "CONFLICTING_FIGURES", scope: "document" }],
     items: STANDARD_ITEMS,
     columns: STANDARD_COLUMNS,
     numberFormat: DOT_DECIMALS_COMMA_GROUPING,
     // The lines add up to the printed total, $5,122.40.
     lineTotalSum: 5122.4,
+    totals: TOTAL_PASSES,
   },
-  // The totals step adds TOTALS_DISAGREE (totals scope) here.
+  // The lines add up to less than the printed total.
   "KBS-10270.pdf": {
     pages: [extracted(4)],
     documentRefusals: [],
@@ -185,6 +192,10 @@ export const SAMPLE_EXPECTATIONS: Record<string, FileExpectation> = {
     numberFormat: DOT_DECIMALS,
     // The lines add up to $1,538.20; the printed total says $1,612.90.
     lineTotalSum: 1538.2,
+    totals: {
+      checks: [{ name: "lines_vs_total", outcome: "fail" }],
+      refusals: [{ code: "TOTALS_DISAGREE", scope: "totals" }],
+    },
   },
   // Eight pages: three sites, a scanned page, a summary page, a returns page,
   // a credit page and an acceptance page (the last two pages that are read
@@ -204,6 +215,7 @@ export const SAMPLE_EXPECTATIONS: Record<string, FileExpectation> = {
     items: STANDARD_ITEMS,
     columns: STANDARD_COLUMNS,
     numberFormat: DOT_DECIMALS,
+    totals: NOT_CHECKED,
   },
 };
 
@@ -307,16 +319,14 @@ export function compareWithExpectation(expected: FileExpectation, result: Engine
   // The number format.
   differ("number format", expected.numberFormat, result.numberFormat);
 
-  // The totals, once the totals step fills them in.
-  if (expected.totals) {
-    differ(
-      "totals checks",
-      expected.totals.checks,
-      result.totals.checks.map((check) => ({ name: check.name, outcome: check.outcome })),
-    );
-    const totalsRefusals = result.refusals.filter((refusal) => refusal.scope === "totals");
-    differ("totals refusals", refusalList(expected.totals.refusals), refusalList(totalsRefusals));
-  }
+  // The totals.
+  differ(
+    "totals checks",
+    expected.totals.checks,
+    result.totals.checks.map((check) => ({ name: check.name, outcome: check.outcome })),
+  );
+  const totalsRefusals = result.refusals.filter((refusal) => refusal.scope === "totals");
+  differ("totals refusals", refusalList(expected.totals.refusals), refusalList(totalsRefusals));
 
   return differences;
 }

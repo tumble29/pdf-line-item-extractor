@@ -46,6 +46,18 @@
  *   unparseableCell  one price cell that is not a clean number ("$12.50 box")
  *   numbersOnlyRow   one row with numbers and no description
  *
+ * Builders for the printed totals and the contradiction scan
+ * -----------------------------------------------------------
+ *   conflictingNotes   a count above the table and a different one below it,
+ *                      plus lines that must not count ("Site 1 of 4", a date,
+ *                      a document number)
+ *   oneCellTotal       "Total: $413.50" drawn as one piece; the lines match
+ *   twoPieceTotals     any totals block, each label and amount drawn apart
+ *   totalGap           the lines add up to less than the printed total
+ *   unknownLabelTotal  a German-style page with a figure under a label the
+ *                      vocabulary doesn't know, equal to the lines or not
+ *   totalAfterScan     3 pages, page 2 a scan, and a total on page 3
+ *
  * The language and layout fixtures (French, German, two-line headers, ...) are
  * in languages.ts, because they need a Unicode font.
  */
@@ -72,6 +84,18 @@ export interface PageSpec {
   shapesOnly?: boolean;
   /** Also draw a small image in the top right corner, like a company logo. */
   logo?: boolean;
+  /**
+   * Totals lines drawn after the table (after `after`), each with its label
+   * and its amount as two separate pieces: the label in the unit price
+   * column, the amount in the line total column.
+   */
+  totals?: { label: string; amount: string }[];
+  /**
+   * Lines of a small separate table drawn last, below everything else: each
+   * line is its pieces, each at its own x. Used for a totals box whose columns
+   * don't line up with the item table's.
+   */
+  box?: { x: number; text: string }[][];
 }
 
 export interface PdfOptions {
@@ -160,7 +184,18 @@ function drawPage(doc: PDFKit.PDFDocument, spec: PageSpec, pageNumber: number, p
     });
   });
   const afterY = LAYOUT.firstRowY + (rows.length - 1) * LAYOUT.rowGap + LAYOUT.afterGap;
-  (spec.after ?? []).forEach((line, index) => text(doc, line, 43, afterY + index * LAYOUT.rowGap));
+  const after = spec.after ?? [];
+  after.forEach((line, index) => text(doc, line, 43, afterY + index * LAYOUT.rowGap));
+  const totals = spec.totals ?? [];
+  totals.forEach(({ label, amount }, index) => {
+    const y = afterY + (after.length + index) * LAYOUT.rowGap;
+    text(doc, label, columns[4]?.x ?? 428, y);
+    text(doc, amount, columns[5]?.x ?? 502, y);
+  });
+  const boxY = afterY + (after.length + totals.length) * LAYOUT.rowGap + LAYOUT.afterGap;
+  (spec.box ?? []).forEach((line, index) => {
+    for (const { x, text: str } of line) text(doc, str, x, boxY + index * LAYOUT.rowGap);
+  });
 }
 
 /** Builds a PDF from page specs. With no options: one default docket page. */
@@ -509,4 +544,74 @@ export const NUMBERS_ONLY_ROW: string[] = ["4", "", "6", "ea", "$3.00", "$18.00"
 /** The default page plus a fourth row that has numbers but no description. */
 export function numbersOnlyRow(): Promise<Uint8Array> {
   return buildPdf({ pages: [{ rows: [...DEFAULT_ROWS, NUMBERS_ONLY_ROW] }] });
+}
+
+// ---------------------------------------------------------------------------
+// The printed totals and the contradiction scan
+// ---------------------------------------------------------------------------
+
+/** What DEFAULT_ROWS add up to: $186.00 + $178.00 + $49.50. */
+export const DEFAULT_ROWS_SUM = "$413.50";
+
+/**
+ * The lines of conflictingNotes(). The title line (a "Label: value" line
+ * above the table) says 8 crates, a note below says 9. The other lines each
+ * hold a number that is not a count and must not cause a refusal.
+ */
+export const CONFLICTING_NOTES = {
+  above: "Loading: 8 crates packed at the yard",
+  below: [
+    "Driver notes: 9 crates unloaded on site.",
+    "Site 1 of 4, Page 1 of 2",
+    "Delivered 24 August 2026 before 10 am",
+    "Docket No: 5512 crates checked 3 times",
+    "Crates stay on site 14, Tirau for 2 days",
+  ],
+} as const;
+
+/** One page whose notes around the table give two different counts of crates. */
+export function conflictingNotes(): Promise<Uint8Array> {
+  return buildPdf({ pages: [{ title: CONFLICTING_NOTES.above, after: [...CONFLICTING_NOTES.below] }] });
+}
+
+/** The default page with "Total: $413.50" drawn as one piece; it equals the lines. */
+export function oneCellTotal(): Promise<Uint8Array> {
+  return buildPdf({ pages: [{ after: [`Total: ${DEFAULT_ROWS_SUM}`] }] });
+}
+
+/** The default page with a totals block, each label and amount drawn as two pieces. */
+export function twoPieceTotals(totals: { label: string; amount: string }[]): Promise<Uint8Array> {
+  return buildPdf({ pages: [{ totals }] });
+}
+
+/** The printed total of totalGap(): $36.50 more than the lines. */
+export const TOTAL_GAP_STATED = "$450.00";
+
+/** The default page with a total that is more than the lines add up to, and no subtotal or GST line. */
+export function totalGap(): Promise<Uint8Array> {
+  return twoPieceTotals([{ label: "Total:", amount: TOTAL_GAP_STATED }]);
+}
+
+/** German-style rows ("15,50"), which add up to 413,50. */
+export const GERMAN_STYLE_ROWS: string[][] = [
+  ["1", "Kantholz 45x19 gehobelt", "12", "Stk", "15,50", "186,00"],
+  ["2", "Terrassenschrauben Box", "8", "Box", "22,25", "178,00"],
+  ["3", "Balkenschuh verzinkt 90", "5", "Stk", "9,90", "49,50"],
+];
+
+/**
+ * A German-style page with a figure below the table under a label the
+ * vocabulary doesn't know ("Endbetrag"). With `matches`, the figure equals
+ * the lines (413,50); without, it doesn't (450,00).
+ */
+export function unknownLabelTotal(options: { matches: boolean }): Promise<Uint8Array> {
+  const amount = options.matches ? "413,50" : "450,00";
+  return buildPdf({ pages: [{ rows: GERMAN_STYLE_ROWS.map((row) => [...row]), totals: [{ label: "Endbetrag:", amount }] }] });
+}
+
+/** Three pages; page 2 is only an image (a scan), and page 3 prints a total covering all three. */
+export function totalAfterScan(): Promise<Uint8Array> {
+  return buildPdf({
+    pages: [{}, { imageOnly: true }, { totals: [{ label: "Total:", amount: "$827.00" }] }],
+  });
 }

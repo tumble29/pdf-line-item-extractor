@@ -606,8 +606,9 @@ export type TotalsCheck = z.infer<typeof TotalsCheck>;
  *   grouping  the thousands mark, "none", or null when it is not proven.
  *             " " stands for every space-like mark (space, no-break space,
  *             narrow no-break space, thin space).
- *   settled   false when some number could be read two ways and was refused,
- *             or when no format fits all the numbers
+ *   settled   false when a line or a printed total was refused as
+ *             AMBIGUOUS_NUMBER_FORMAT (its number could be read two ways), or
+ *             when no format fits the numbers of every page
  */
 export const NumberFormat = z
   .strictObject({

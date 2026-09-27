@@ -44,7 +44,7 @@ import type { Note } from "@/lib/contract/schema";
 import { NOTES } from "@/lib/contract/notes";
 
 import type { Cell, Row } from "./rows";
-import { CARRIED_FORWARD, findWord } from "./vocabulary";
+import { CARRIED_FORWARD, findWord, startsWithTotalsLabel } from "./vocabulary";
 
 /**
  * Cell edges must line up within this many font sizes to be in the same
@@ -187,6 +187,15 @@ export interface PageLayout {
    * there is no table.
    */
   below: Row[];
+  /**
+   * The rows of the other tables on the page, which were not read (each table
+   * gets one note). They are table text, not notes about the document, so the
+   * contradiction scan leaves them out. The totals step skips them too, except
+   * a row that starts with a totals label: a totals box drawn as its own small
+   * table ("Subtotal | NZD | 413.50") still holds the printed totals, and a
+   * table made only of such rows gets no note.
+   */
+  otherTableRows: Row[];
   /**
    * Notes found while detecting: a carried-forward line that was set aside,
    * a section heading or a short line between two parts of one table, another
@@ -857,7 +866,7 @@ export function findTable(rows: readonly Row[], page: number): PageLayout {
       i = run.endIndex;
     }
   }
-  if (candidates.length === 0) return { rows: [...rows], table: null, above: searched, below: [], notes };
+  if (candidates.length === 0) return { rows: [...rows], table: null, above: searched, below: [], otherTableRows: [], notes };
 
   // 4. The item table: the first table with the most number columns. The
   //    tables above it are not read; each gets a note, and their rows are
@@ -866,10 +875,15 @@ export function findTable(rows: readonly Row[], page: number): PageLayout {
     numericColumnCount(candidate.run) > numericColumnCount(best.run) ? candidate : best,
   );
   const { run: table, header } = chosen;
+  // The rows of every other table on the page, above or below this one. A
+  // table whose every row starts with a totals label ("Subtotal | NZD |
+  // 413.50") is a totals box: the totals step reads it, so it gets no "we
+  // didn't read it" note.
   const skipped = new Set<Row>();
+  const isTotalsBox = (run: Run) => run.body.every((bodyRow) => startsWithTotalsLabel(bodyRow.row.text));
   for (const candidate of candidates) {
     if (candidate === chosen) break;
-    notes.push(NOTES.otherTableNotRead(page, candidate.run.body[0].row.text));
+    if (!isTotalsBox(candidate.run)) notes.push(NOTES.otherTableNotRead(page, candidate.run.body[0].row.text));
     for (const row of searched.slice(firstRowOf(candidate), candidate.run.endIndex + 1)) skipped.add(row);
   }
 
@@ -898,8 +912,10 @@ export function findTable(rows: readonly Row[], page: number): PageLayout {
       i = later.endIndex + 1;
       continue;
     }
-    if (isTable(later, attachHeader(searched, later, setAside))) {
-      notes.push(NOTES.otherTableNotRead(page, later.body[0].row.text));
+    const laterHeader = attachHeader(searched, later, setAside);
+    if (isTable(later, laterHeader)) {
+      if (!isTotalsBox(later)) notes.push(NOTES.otherTableNotRead(page, later.body[0].row.text));
+      for (const row of searched.slice(firstRowOf({ run: later, header: laterHeader }), later.endIndex + 1)) skipped.add(row);
       i = later.endIndex + 1;
       continue;
     }
@@ -911,6 +927,7 @@ export function findTable(rows: readonly Row[], page: number): PageLayout {
     table: toTable(table, header),
     above: searched.slice(0, firstRowOf(chosen)).filter((row) => !skipped.has(row)),
     below: searched.slice(table.endIndex + 1),
+    otherTableRows: searched.filter((row) => skipped.has(row)),
     notes,
   };
 }

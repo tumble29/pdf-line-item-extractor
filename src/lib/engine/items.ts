@@ -43,6 +43,7 @@ import {
   currencyCode,
   formatNumber,
   hasValidCore,
+  markerIsAfter,
   readNumber,
   type Convention,
   type NumberParts,
@@ -69,12 +70,31 @@ export interface ItemsResult {
   /**
    * Body rows that turned out to be totals rows (see `isLabelledTotal` and
    * `isRunningTotal`). They are moved out of the table so their money is not
-   * counted twice, and each one gets a note. The totals step will read them
-   * as printed totals.
+   * counted twice, and each one gets a note. totals.ts reads them as printed
+   * totals.
    */
-  totalsRows: Row[];
-  /** True when at least one cell was refused because it could be read two ways. */
+  totalsRows: TotalsRow[];
+  /**
+   * True when at least one row was refused as AMBIGUOUS_NUMBER_FORMAT. A row
+   * whose refusal names another problem (a cell further left that can't be
+   * read) doesn't count, even if it also holds a number with two readings:
+   * `numberFormat.settled` must only say what a refusal shows.
+   */
   ambiguousNumbers: boolean;
+}
+
+/**
+ * A body row moved out of the table as a totals row, with the cell in the
+ * line-total column: that cell is the total's amount, even when the row also
+ * prints a quantity ("Total 25 $413.50"). `amount` is null when the page has
+ * no line-total column (totals.ts then reads the row as text), or when the
+ * cell is empty (the line totals only a count, so it holds no money total).
+ */
+export interface TotalsRow {
+  row: Row;
+  amount: Cell | null;
+  /** True when the page has a line-total column (so an empty `amount` means the line totals no money). */
+  hasTotalColumn: boolean;
 }
 
 /**
@@ -206,12 +226,6 @@ function descriptionEnd(bodyRow: TableRow, cell: Cell, position: number, columns
   return end;
 }
 
-/** True when the currency marker is printed after the number ("1 195,20 €"). */
-function markerAfterNumber(parts: NumberParts): boolean {
-  if (parts.currencyMarker === null) return false;
-  return parts.raw.lastIndexOf(parts.currencyMarker) > parts.raw.search(/\d/);
-}
-
 /** A number cell that was read: its field, and what the arithmetic check needs. */
 interface ReadCell {
   field: Field;
@@ -332,7 +346,6 @@ function readRow(bodyRow: TableRow, context: Context): RowResult {
   const missing: Role[] = [];
   const numbers: Partial<Record<NumericRole, ReadCell>> = {};
   let problem: RowInput | null = null;
-  let ambiguous = false;
 
   for (const column of table.columns) {
     const role = context.roles[column.position];
@@ -355,7 +368,6 @@ function readRow(bodyRow: TableRow, context: Context): RowResult {
         fields[role] = result.read.field;
         numbers[role] = result.read;
       } else {
-        if (result.problem.code === "AMBIGUOUS_NUMBER_FORMAT") ambiguous = true;
         // The first problem from the left is the one the refusal names.
         problem ??= result.problem;
       }
@@ -365,10 +377,12 @@ function readRow(bodyRow: TableRow, context: Context): RowResult {
     fields[role] = { header: column.header, raw: sourceText.slice(cell.start, end), span: [cell.start, end] };
   }
 
+  // The row counts as ambiguous only when its refusal says so (see
+  // ItemsResult.ambiguousNumbers).
   const refuse = (input: RowInput): RowResult => ({
     item: null,
     refusal: rowRefusal(input, row.index, evidence),
-    ambiguous,
+    ambiguous: input.code === "AMBIGUOUS_NUMBER_FORMAT",
   });
 
   if (problem) return refuse(problem);
@@ -397,7 +411,7 @@ function readRow(bodyRow: TableRow, context: Context): RowResult {
           lineTotal.dp,
           context.conventions,
           lineTotal.parts.currencyMarker,
-          markerAfterNumber(lineTotal.parts),
+          markerIsAfter(lineTotal.parts),
         ),
         columnBetween: columnBetween(context),
       });
@@ -501,21 +515,26 @@ export function buildItems(page: number, table: Table, decision: RoleDecision, c
   // totals row, for the running-total rule (see isRunningTotal).
   let above: number[] = [];
   let complete = true;
-  const moveOut = (row: Row) => {
-    result.totalsRows.push(row);
-    result.notes.push(NOTES.totalsRowSkipped(page, row.text));
+  const moveOut = (bodyRow: TableRow) => {
+    const totalAt = positionOf.lineTotal;
+    result.totalsRows.push({
+      row: bodyRow.row,
+      amount: totalAt === undefined ? null : bodyRow.cells[totalAt],
+      hasTotalColumn: totalAt !== undefined,
+    });
+    result.notes.push(NOTES.totalsRowSkipped(page, bodyRow.row.text));
     above = [];
     complete = true;
   };
 
   for (const bodyRow of table.body) {
     if (isLabelledTotal(bodyRow, positionOf.unitPrice)) {
-      moveOut(bodyRow.row);
+      moveOut(bodyRow);
       continue;
     }
     const rowResult = readRow(bodyRow, context);
     if (rowResult.item && isRunningTotal(rowResult.item, above, complete)) {
-      moveOut(bodyRow.row);
+      moveOut(bodyRow);
       continue;
     }
     itemRows.push(bodyRow);

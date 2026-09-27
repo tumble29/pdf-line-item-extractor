@@ -492,6 +492,15 @@ export function currencyCode(marker: string | null): string | null {
 }
 
 /**
+ * True when a cell's currency marker is printed after the number ("1 195,20
+ * €"), so a number we write in the same style puts it there too.
+ */
+export function markerIsAfter(parts: NumberParts): boolean {
+  if (parts.currencyMarker === null) return false;
+  return parts.raw.lastIndexOf(parts.currencyMarker) > parts.raw.search(/\d/);
+}
+
+/**
  * The largest number of decimals we write. Money needs 2, and a few unit
  * prices need 3 or 4; 10 is far more than any quote uses, and it keeps the
  * rounding below inside the precision of a JavaScript number.

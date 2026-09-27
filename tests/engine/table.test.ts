@@ -291,7 +291,7 @@ describe("findTable: the basic table", () => {
   });
 
   it("gives no table on an empty page", () => {
-    expect(findTable([], 1)).toEqual({ rows: [], table: null, above: [], below: [], notes: [] });
+    expect(findTable([], 1)).toEqual({ rows: [], table: null, above: [], below: [], otherTableRows: [], notes: [] });
   });
 });
 
