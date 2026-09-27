@@ -31,6 +31,15 @@ type PageInput = Extract<RefusalInput, { code: PageCode }>;
 /** The findings about the whole document that sit next to the items in a normal result. */
 type FindingInput = Extract<RefusalInput, { code: "CONFLICTING_FIGURES" | "NO_LINE_ITEMS_FOUND" }>;
 
+/** The codes that refuse one row (one line item), and their facts. */
+type RowCode =
+  | "UNPARSEABLE_NUMBER"
+  | "NO_DESCRIPTION"
+  | "ARITHMETIC_MISMATCH"
+  | "AMBIGUOUS_NUMBER_FORMAT"
+  | "EVIDENCE_CHECK_FAILED";
+type RowInput = Extract<RefusalInput, { code: RowCode }>;
+
 /** A refusal of the whole file, before anything could be read. */
 export type DocumentRefusal = Refusal & { code: DocumentCode; scope: "document" };
 
@@ -65,6 +74,27 @@ export function pageRefusal(input: PageInput, evidence: Evidence[] = []): Refusa
     code: input.code,
     scope: "page",
     page: input.page,
+    message: refusalMessage(input),
+    evidence,
+  };
+}
+
+/**
+ * A refusal of one row: that line is left out, and the rest of the page is
+ * still read. `evidence` should quote the row as printed, so the user can see
+ * exactly which line was left out and why.
+ *
+ * Example:
+ *   rowRefusal({ code: "UNPARSEABLE_NUMBER", page: 1, raw: "$12.50 box" }, 7, [{ page: 1, sourceText: "3 Nails $12.50 box" }])
+ *   -> { id: "p1-r7-UNPARSEABLE_NUMBER", scope: "row", page: 1, rowIndex: 7, ... }
+ */
+export function rowRefusal(input: RowInput, rowIndex: number, evidence: Evidence[]): Refusal {
+  return {
+    id: `p${input.page}-r${rowIndex}-${input.code}`,
+    code: input.code,
+    scope: "row",
+    page: input.page,
+    rowIndex,
     message: refusalMessage(input),
     evidence,
   };

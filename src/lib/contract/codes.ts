@@ -37,8 +37,11 @@ import type { DocumentCode, RefusalCode, Role, StatedTotal } from "./schema";
 // Small wording helpers
 // ---------------------------------------------------------------------------
 
-/** How each role is named inside a sentence. */
-const ROLE_WORDS: Record<Role, { one: string; many: string }> = {
+/**
+ * How each role is named inside a sentence. Exported so that other code that
+ * passes role names into notes (roles.ts) uses the same words.
+ */
+export const ROLE_WORDS: Record<Role, { one: string; many: string }> = {
   itemNo: { one: "item number", many: "item numbers" },
   code: { one: "code", many: "codes" },
   description: { one: "description", many: "descriptions" },
@@ -186,8 +189,12 @@ export interface MessageContexts {
   /** `title` is the part of the title line that contains the credit or return word, as printed. */
   CREDIT_OR_RETURN_PAGE: PageContext & { title: string };
 
-  /** `raw` is the cell exactly as printed. */
-  UNPARSEABLE_NUMBER: PageContext & { raw: string };
+  /**
+   * `raw` is the cell exactly as printed. `otherFormat` is true when the cell
+   * is a number, but written in another format than the rest of its page (a
+   * "1,5" among "1,250.00" numbers), so we can't be sure which value it means.
+   */
+  UNPARSEABLE_NUMBER: PageContext & { raw: string; otherFormat?: boolean };
   /** `rowText` is the row as printed, so the user can find it on the page. */
   NO_DESCRIPTION: PageContext & { rowText: string };
   /**
@@ -351,7 +358,11 @@ export const REFUSAL_MESSAGES: { [Code in RefusalCode]: (context: MessageContext
     "We didn't list them as normal items.",
 
   // --- One row -------------------------------------------------------------
-  UNPARSEABLE_NUMBER: ({ page, raw }) => `'${raw}' on page ${page} isn't a number we can read, so that line was left out.`,
+  UNPARSEABLE_NUMBER: ({ page, raw, otherFormat }) =>
+    otherFormat
+      ? `'${raw}' on page ${page} is written in a different number format from the other numbers on that page, ` +
+        "so we can't be sure what it means. That line was left out."
+      : `'${raw}' on page ${page} isn't a number we can read, so that line was left out.`,
   NO_DESCRIPTION: ({ page, rowText }) =>
     `A row on page ${page} has numbers but no description ('${rowText}'), so we didn't attach them to any line.`,
   ARITHMETIC_MISMATCH: ({ page, quantity, unitPrice, lineTotal, expected, columnBetween }) => {

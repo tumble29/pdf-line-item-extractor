@@ -107,7 +107,10 @@ const SAMPLES: { [Code in RefusalCode]: MessageContexts[Code][] } = {
   COLUMN_MEANING_UNKNOWN: [{ page: 2 }],
   CREDIT_OR_RETURN_PAGE: [{ page: 6, title: "Returns Note" }],
 
-  UNPARSEABLE_NUMBER: [{ page: 1, raw: "$12.50 box" }],
+  UNPARSEABLE_NUMBER: [
+    { page: 1, raw: "$12.50 box" },
+    { page: 3, raw: "1,5", otherFormat: true },
+  ],
   NO_DESCRIPTION: [{ page: 1, rowText: "2 45.00 90.00" }],
   ARITHMETIC_MISMATCH: [
     { page: 1, quantity: "2", unitPrice: "$45.00", lineTotal: "$95.00", expected: "$90.00" },
@@ -300,13 +303,42 @@ describe("whole-file problems", () => {
   });
 });
 
+/**
+ * Sample facts for every note, all on page 7. Typed against NOTES, so a new
+ * note can't be added without a sample here.
+ */
+const NOTE_SAMPLES: { [Name in keyof typeof NOTES]: Parameters<(typeof NOTES)[Name]> } = {
+  blankPage: [7],
+  imagesNotRead: [7],
+  rotatedTextIgnored: [7],
+  sectionHeading: [7, "Stage 1 - Framing"],
+  shortLineInTable: [7, "Less 10% trade discount -$18.60"],
+  descriptionWraps: [7],
+  carriedForwardSkipped: [7, "Carried forward $1,200.00"],
+  totalsRowSkipped: [7, "Total 25 $413.50"],
+  otherTableNotRead: [7, "Account 1001 Terms 30 days"],
+  columnNotRead: [7, "Weight"],
+  headerOnlyRole: [7, "Qty", "the quantity"],
+  headingFollowed: [7, "Item", "codes", "item number"],
+  headingTwoMeanings: [7, "Qty Unit"],
+  mixedTotalWording: [7, "Weight", ["25kg", "480g total"]],
+  summaryPage: [7, "Summary"],
+  unknownHeadings: [7],
+  noHeadings: [7],
+};
+
 describe("notes", () => {
-  it.each(Object.entries(NOTES))("%s reads as a plain sentence that names its page", (_name, makeNote) => {
-    const note = makeNote(7);
+  it.each(Object.keys(NOTE_SAMPLES) as (keyof typeof NOTES)[])("%s reads as a plain sentence that names its page", (name) => {
+    const makeNote = NOTES[name] as (...args: unknown[]) => { level: string; text: string };
+    const note = makeNote(...NOTE_SAMPLES[name]);
     expect(["info", "warning"]).toContain(note.level);
     expect(note.text).toMatch(/[.!?]$/);
     expect(note.text).toMatch(/\b[Pp]age 7\b/);
     for (const pattern of FORBIDDEN) expect(note.text).not.toMatch(pattern);
+  });
+
+  it("quotes every example in the mixed-wording warning", () => {
+    expect(NOTES.mixedTotalWording(1, "Weight", ["25kg", "480g total"]).text).toContain("('25kg' and '480g total')");
   });
 });
 
