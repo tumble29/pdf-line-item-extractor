@@ -296,6 +296,7 @@ export const DocumentCode = z.enum([
   "NOT_A_PDF",
   "ENCRYPTED",
   "CORRUPT_FILE",
+  "TOO_MANY_PAGES",
 ]);
 export type DocumentCode = z.infer<typeof DocumentCode>;
 
@@ -352,6 +353,7 @@ export const REFUSAL_SCOPES: { [Code in RefusalCode]: readonly RefusalScope[] } 
   NOT_A_PDF: ["document"],
   ENCRYPTED: ["document"],
   CORRUPT_FILE: ["document"],
+  TOO_MANY_PAGES: ["document"],
   NO_TEXT_LAYER: ["page"],
   GARBLED_TEXT: ["page"],
   ROTATED_TEXT: ["page"],
@@ -392,7 +394,8 @@ export const PAGE_REFUSAL_STATUS = {
  *   400  the request itself is wrong (no file in it)
  *   413  the file is too large
  *   415  the file is not the type we read
- *   422  the file is the right type, but we can't read its contents
+ *   422  the file is the right type, but we can't read its contents (or it has
+ *        more pages than we read)
  */
 export const DOCUMENT_HTTP_STATUS: Record<DocumentCode, number> = {
   NO_FILE: 400,
@@ -401,6 +404,7 @@ export const DOCUMENT_HTTP_STATUS: Record<DocumentCode, number> = {
   NOT_A_PDF: 415,
   ENCRYPTED: 422,
   CORRUPT_FILE: 422,
+  TOO_MANY_PAGES: 422,
 };
 
 /** The HTTP status when our own code fails. It is never used for a problem with the user's file. */

@@ -149,14 +149,22 @@ export interface MessageContexts {
   NOT_A_PDF: { fileName: string };
   ENCRYPTED: NoContext;
   CORRUPT_FILE: NoContext;
+  /** `pageCount` is how many pages the file has; `limit` is the most we read. */
+  TOO_MANY_PAGES: { pageCount: number; limit: number };
 
   /**
-   * `mostly` is true when the page is a scan with a few words of real text on
-   * it, and false when it has no text at all.
+   * `form` says what the page has instead of readable text:
+   *   - "scan":       a picture (a scan or a photo) and no text at all
+   *   - "mostlyScan": a picture with only a few words of real text on it
+   *   - "shapes":     drawings (lines, shapes, or text turned into outlines) and no text
    */
-  NO_TEXT_LAYER: PageContext & { mostly: boolean };
+  NO_TEXT_LAYER: PageContext & { form: "scan" | "mostlyScan" | "shapes" };
   GARBLED_TEXT: PageContext;
-  ROTATED_TEXT: PageContext;
+  /**
+   * `allText` is true when every piece of text on the page is sideways (there
+   * may be no numbers at all), and false when most of the numbers are.
+   */
+  ROTATED_TEXT: PageContext & { allText: boolean };
   /**
    * `cause` says why the page failed:
    *   - "error":   reading the page threw
@@ -270,20 +278,39 @@ export const REFUSAL_MESSAGES: { [Code in RefusalCode]: (context: MessageContext
       ? "This file isn't a PDF, even though its name ends in .pdf. It may be another kind of file " +
         "that was renamed. Save or export it as a PDF and try again."
       : "This file isn't a PDF. Choose a PDF file and try again.",
-  ENCRYPTED: () => "This PDF is password-protected. Remove the password and upload it again.",
+  // This covers a password and other kinds of protection (for example
+  // certificate security), which pdf.js can't open either.
+  ENCRYPTED: () =>
+    "This PDF is protected with a password or other security, so we can't open it. " +
+    "Remove the protection and upload it again.",
   CORRUPT_FILE: () => "This file is damaged and couldn't be opened. Try downloading or exporting it again.",
+  TOO_MANY_PAGES: ({ pageCount, limit }) =>
+    `This file has ${pageCount} pages. We read files of up to ${limit} pages. ` +
+    "Split it into smaller files and try again.",
 
   // --- One page ------------------------------------------------------------
-  NO_TEXT_LAYER: ({ page, mostly }) =>
-    mostly
-      ? `Page ${page} is mostly a scanned picture. Only a few words on it can be read as text. ` +
+  NO_TEXT_LAYER: ({ page, form }) => {
+    if (form === "mostlyScan") {
+      return (
+        `Page ${page} is mostly a scanned picture. Only a few words on it can be read as text. ` +
         "We don't read scans, so nothing on it was extracted."
-      : `Page ${page} is a scanned picture. We don't read scans, so nothing on it was extracted.`,
+      );
+    }
+    if (form === "shapes") {
+      return (
+        `Page ${page} has drawings but no text we can read. The text may have been saved as shapes. ` +
+        "We don't read drawings, so nothing on it was extracted."
+      );
+    }
+    return `Page ${page} is a scanned picture. We don't read scans, so nothing on it was extracted.`;
+  },
   GARBLED_TEXT: ({ page }) =>
     `The text on page ${page} turned into random symbols when we read it, so we didn't use any of it.`,
-  ROTATED_TEXT: ({ page }) =>
-    `Most of the numbers on page ${page} are printed sideways, so we could misread which column ` +
-    "they belong to. We skipped the page.",
+  ROTATED_TEXT: ({ page, allText }) =>
+    allText
+      ? `All the text on page ${page} is printed sideways, so we skipped the page.`
+      : `Most of the numbers on page ${page} are printed sideways, so we could misread which column ` +
+        "they belong to. We skipped the page.",
   PAGE_LOAD_FAILED: ({ page, cause }) => {
     if (cause === "timeout") {
       return `Page ${page} couldn't be read because it took too long. The other pages weren't affected.`;
@@ -293,12 +320,12 @@ export const REFUSAL_MESSAGES: { [Code in RefusalCode]: (context: MessageContext
       // before this one was read. We only say what is true for all of them.
       return (
         `Page ${page} wasn't read because reading the whole file took too long. ` +
-        "Pages read before the time ran out are listed as usual."
+        "The pages we read before the time ran out are shown as normal."
       );
     }
-    // "error": the cause could be the page, or our own code. We don't blame the
-    // page, and we say only what the user needs to know.
-    return `Page ${page} couldn't be read. Our program stopped while reading it. The other pages weren't affected.`;
+    // "error": the cause could be the page, or our own code. We don't blame
+    // the page, and we say only what the user needs to know.
+    return `Page ${page} couldn't be read: our reader hit an error on this page. The other pages weren't affected.`;
   },
   NO_TABLE_FOUND: ({ page }) => `Page ${page} has text, but we couldn't find a table of line items on it.`,
   AMBIGUOUS_COLUMNS: (context) => {
@@ -414,8 +441,9 @@ export const DOCUMENT_PROBLEM_TITLES: Record<DocumentCode, string> = {
   EMPTY_FILE: "Empty file",
   FILE_TOO_LARGE: "File too large",
   NOT_A_PDF: "Not a PDF",
-  ENCRYPTED: "Password-protected PDF",
+  ENCRYPTED: "Protected PDF",
   CORRUPT_FILE: "Damaged PDF",
+  TOO_MANY_PAGES: "Too many pages",
 };
 
 /**

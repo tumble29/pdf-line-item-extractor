@@ -13,7 +13,8 @@
  *   - it names the page when the refusal is about a page, so the user can find it
  *
  * Separately, the messages that contain numbers we calculated
- * (ARITHMETIC_MISMATCH and TOTALS_DISAGREE) must label them "(calculated by us)".
+ * (ARITHMETIC_MISMATCH and TOTALS_DISAGREE) must label them "(calculated by us)",
+ * and every note in src/lib/contract/notes.ts must pass the same sentence checks.
  *
  * The SAMPLES table below is typed against the list of refusal codes. If
  * someone adds a code to schema.ts without adding samples here, TypeScript
@@ -33,6 +34,7 @@ import {
   problemType,
   refusalMessage,
 } from "@/lib/contract/codes";
+import { NOTES } from "@/lib/contract/notes";
 import {
   DOCUMENT_HTTP_STATUS,
   DocumentCode,
@@ -66,13 +68,18 @@ const SAMPLES: { [Code in RefusalCode]: MessageContexts[Code][] } = {
   NOT_A_PDF: [{ fileName: "notes.pdf" }, { fileName: "photo.jpg" }],
   ENCRYPTED: [{}],
   CORRUPT_FILE: [{}],
+  TOO_MANY_PAGES: [{ pageCount: 350, limit: 200 }],
 
   NO_TEXT_LAYER: [
-    { page: 3, mostly: false },
-    { page: 3, mostly: true },
+    { page: 3, form: "scan" },
+    { page: 3, form: "mostlyScan" },
+    { page: 3, form: "shapes" },
   ],
   GARBLED_TEXT: [{ page: 2 }],
-  ROTATED_TEXT: [{ page: 4 }],
+  ROTATED_TEXT: [
+    { page: 4, allText: false },
+    { page: 4, allText: true },
+  ],
   PAGE_LOAD_FAILED: [
     { page: 5, cause: "error" },
     { page: 5, cause: "timeout" },
@@ -230,6 +237,16 @@ describe("refusal messages", () => {
     expect(sample("TOTALS_UNVERIFIABLE", 4)).toContain("($500.00 on page 1 and $550.00 on page 2)");
   });
 
+  it("says what a page without readable text has instead", () => {
+    expect(sample("NO_TEXT_LAYER", 0)).toContain("is a scanned picture");
+    expect(sample("NO_TEXT_LAYER", 2)).toContain("has drawings but no text we can read");
+  });
+
+  it("only talks about numbers when the numbers are what is sideways", () => {
+    expect(sample("ROTATED_TEXT", 0)).toContain("Most of the numbers on page 4");
+    expect(sample("ROTATED_TEXT", 1)).toBe("All the text on page 4 is printed sideways, so we skipped the page.");
+  });
+
   it("only says 'ends in .pdf' when the file name really does", () => {
     expect(refusalMessage({ code: "NOT_A_PDF", fileName: "Invoice.PDF" })).toContain("even though its name ends in .pdf");
     expect(refusalMessage({ code: "NOT_A_PDF", fileName: "photo.jpg" })).not.toContain("ends in .pdf");
@@ -280,6 +297,16 @@ describe("whole-file problems", () => {
     expect(problemType("ENCRYPTED")).toBe("/problems/encrypted");
     expect(problemType("FILE_TOO_LARGE")).toBe("/problems/file-too-large");
     expect(problemType("INTERNAL")).toBe("/problems/internal");
+  });
+});
+
+describe("notes", () => {
+  it.each(Object.entries(NOTES))("%s reads as a plain sentence that names its page", (_name, makeNote) => {
+    const note = makeNote(7);
+    expect(["info", "warning"]).toContain(note.level);
+    expect(note.text).toMatch(/[.!?]$/);
+    expect(note.text).toMatch(/\b[Pp]age 7\b/);
+    for (const pattern of FORBIDDEN) expect(note.text).not.toMatch(pattern);
   });
 });
 
