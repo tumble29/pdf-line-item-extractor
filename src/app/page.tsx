@@ -1,69 +1,99 @@
-import Image from "next/image";
+"use client";
+
+// Temporary upload page for the platform smoke test. It shows the server's
+// own reason for every outcome. The real UI (Part B) replaces this page.
+import { useState } from "react";
+
+const MAX_BYTES = 4 * 1024 * 1024;
+
+type Outcome =
+  | { state: "idle" }
+  | { state: "uploading"; fileName: string }
+  | { state: "done"; status: number; body: unknown; detail?: string }
+  | { state: "message"; text: string };
+
+function formatSize(bytes: number) {
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 export default function Home() {
+  const [outcome, setOutcome] = useState<Outcome>({ state: "idle" });
+
+  async function upload(file: File) {
+    if (file.size > MAX_BYTES) {
+      setOutcome({
+        state: "message",
+        text: `This file is ${formatSize(file.size)}. The limit is 4 MB, so it wasn't sent.`,
+      });
+      return;
+    }
+
+    setOutcome({ state: "uploading", fileName: file.name });
+    const form = new FormData();
+    form.append("file", file);
+
+    let res: Response;
+    try {
+      res = await fetch("/api/parse", { method: "POST", body: form });
+    } catch {
+      setOutcome({
+        state: "message",
+        text: "We couldn't reach the server. Check your connection and try again.",
+      });
+      return;
+    }
+
+    const text = await res.text();
+    try {
+      const body = JSON.parse(text) as { detail?: unknown };
+      const detail = typeof body.detail === "string" ? body.detail : undefined;
+      setOutcome({ state: "done", status: res.status, body, detail });
+    } catch {
+      setOutcome({
+        state: "message",
+        text:
+          res.status === 413
+            ? "The file was too large for the server to accept."
+            : `The server replied with status ${res.status}, but not in the format we expected. Your file may be fine.`,
+      });
+    }
+  }
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+    <main className="mx-auto w-full max-w-2xl px-4 py-12">
+      <h1 className="text-2xl font-semibold">PDF line-item extractor</h1>
+      <p className="mt-2 text-sm opacity-70">
+        Temporary test page. Upload a PDF (up to 4 MB) to check that the server can open it.
+      </p>
+
+      <input
+        type="file"
+        accept="application/pdf"
+        className="mt-6 block w-full text-sm file:mr-4 file:rounded file:border-0 file:bg-foreground file:px-4 file:py-2 file:text-background"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) void upload(file);
+        }}
+      />
+
+      <section className="mt-6" aria-live="polite">
+        {outcome.state === "uploading" && <p>Reading {outcome.fileName}…</p>}
+        {outcome.state === "message" && (
+          <p className="rounded border border-amber-500 p-3">{outcome.text}</p>
+        )}
+        {outcome.state === "done" && (
+          <div className="space-y-3">
+            {outcome.detail && (
+              <p className="rounded border border-amber-500 p-3">{outcome.detail}</p>
+            )}
+            <pre className="overflow-x-auto rounded bg-black/5 p-3 text-xs dark:bg-white/10">
+              HTTP {outcome.status}
+              {"\n"}
+              {JSON.stringify(outcome.body, null, 2)}
+            </pre>
+          </div>
+        )}
+      </section>
+    </main>
   );
 }
