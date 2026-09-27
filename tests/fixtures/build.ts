@@ -32,6 +32,22 @@
  *                    pdf.js limitation (it then loses page 3 too)
  *   truncated        the first half of a valid PDF
  *   notPdf, empty    not a PDF at all
+ *
+ * Builders for engine rules (Part 5)
+ * ----------------------------------
+ *   docket           Description | Qty | Unit: three columns and no prices
+ *   multiPage        3 pages; a "Carried forward" row on page 2, a subtotal on page 3
+ *   rotatedStamp     a normal table with a "PAID" stamp turned 45 degrees
+ *   shiftedColumns   Item | Description | Qty | Weight | Unit Price at other x
+ *                    positions, prices with "/bag" and "/ea", one weight saying "total"
+ *   titledPages      5 pages whose titles use a summary, returns, credit and
+ *                    acceptance word, and a "Summary: ..." label line on page 5
+ *   mismatchRow      one row where qty x price is not the line total
+ *   unparseableCell  one price cell that is not a clean number ("$12.50 box")
+ *   numbersOnlyRow   one row with numbers and no description
+ *
+ * The language and layout fixtures (French, German, two-line headers, ...) are
+ * in languages.ts, because they need a Unicode font.
  */
 import PDFDocument from "pdfkit";
 
@@ -54,6 +70,8 @@ export interface PageSpec {
   imageOnly?: boolean;
   /** Draw only boxes on this page, and no text: a page whose text was saved as shapes. */
   shapesOnly?: boolean;
+  /** Also draw a small image in the top right corner, like a company logo. */
+  logo?: boolean;
 }
 
 export interface PdfOptions {
@@ -129,6 +147,7 @@ function drawPage(doc: PDFKit.PDFDocument, spec: PageSpec, pageNumber: number, p
   const columns = spec.columns ?? DEFAULT_COLUMNS;
   const rows = spec.rows ?? DEFAULT_ROWS;
 
+  if (spec.logo) doc.image(TINY_PNG, 480, 40, { width: 60 });
   doc.fontSize(LAYOUT.fontSize);
   text(doc, "Example Supplies Ltd", 43, LAYOUT.supplierY);
   text(doc, spec.title ?? `Delivery docket - Site ${pageNumber} of ${pageCount}`, 43, LAYOUT.titleY);
@@ -291,4 +310,203 @@ export function empty(): Uint8Array {
 /** Wraps bytes as a File, the way an upload arrives at the route. */
 export function asFile(bytes: Uint8Array, name = "test.pdf", type = "application/pdf"): File {
   return new File([bytes as BlobPart], name, { type });
+}
+
+// ---------------------------------------------------------------------------
+// Builders for engine rules (Part 5)
+// ---------------------------------------------------------------------------
+
+/**
+ * Builds a PDF like `buildPdf`, then lets `extra` draw more on each page (a
+ * stamp, a label line). `extra` gets the page index, counting from 0.
+ */
+function buildWith(pages: PageSpec[], extra: (doc: PDFKit.PDFDocument, index: number) => void): Promise<Uint8Array> {
+  const doc = new PDFDocument({ size: "A4", margin: 0, autoFirstPage: false });
+  const done = collect(doc);
+  pages.forEach((spec, index) => {
+    doc.addPage({ size: "A4", margin: 0 });
+    drawPage(doc, spec, index + 1, pages.length);
+    extra(doc, index);
+  });
+  doc.end();
+  return done;
+}
+
+/** The columns of the docket fixture: three columns, no prices. */
+export const DOCKET_COLUMNS: ColumnSpec[] = [
+  { header: "Description", x: 43 },
+  { header: "Qty", x: 300 },
+  { header: "Unit", x: 360 },
+];
+
+/** The rows of the docket fixture. */
+export const DOCKET_ROWS: string[][] = [
+  ["Rough sawn fence rail 150x50", "20", "length"],
+  ["Coach screw 12x100", "40", "ea"],
+  ["Chain link mesh 1.8m roll", "2", "roll"],
+];
+
+/**
+ * A docket with Description | Qty | Unit and no prices. Three columns is the
+ * smallest table the detector reads (a two-column block is kept out on
+ * purpose, so label/value blocks are never read as tables).
+ */
+export function docket(): Promise<Uint8Array> {
+  return buildPdf({ pages: [{ columns: DOCKET_COLUMNS, rows: DOCKET_ROWS }] });
+}
+
+/**
+ * The pages of the multi-page fixture. Each page has its own rows, and every
+ * row multiplies correctly. Page 2's table starts with a "Carried forward" row
+ * that repeats page 1's lines total ($365.10). Page 3 ends with a subtotal of
+ * every line on all three pages ($1,144.95). The carried-forward row must
+ * never become an item, or its money is counted twice.
+ */
+export const MULTI_PAGE = {
+  pages: [
+    [
+      ["1", "Macrocarpa sleeper 200x100 2.4m", "6", "length", "$42.00", "$252.00"],
+      ["2", "Garden edging steel 1.2m", "10", "ea", "$8.75", "$87.50"],
+      ["3", "Landscape pins 150mm pack", "4", "pack", "$6.40", "$25.60"],
+    ],
+    [
+      ["", "Carried forward", "", "", "", "$365.10"],
+      ["4", "Weed mat 1.8x50m roll", "1", "roll", "$96.00", "$96.00"],
+      ["5", "Bark mulch 40L bag", "25", "bag", "$11.20", "$280.00"],
+      ["6", "Drip line 16mm 100m", "2", "roll", "$58.90", "$117.80"],
+    ],
+    [
+      ["7", "Irrigation timer 4 zone", "1", "ea", "$129.00", "$129.00"],
+      ["8", "Joiner elbow 16mm pack", "3", "pack", "$4.35", "$13.05"],
+      ["9", "Compost 30L bag", "15", "bag", "$9.60", "$144.00"],
+    ],
+  ],
+  carriedForward: "$365.10",
+  subtotalLine: "Subtotal: $1,144.95",
+  /** Line items only: the carried-forward row is not one. */
+  itemCount: 9,
+} as const;
+
+/** Three pages with the header on every page, a carried-forward row on page 2 and a subtotal on page 3. */
+export function multiPage(): Promise<Uint8Array> {
+  const pages = MULTI_PAGE.pages;
+  return buildPdf({
+    pages: pages.map((rows, index) => ({
+      rows: rows.map((row) => [...row]),
+      after: index === pages.length - 1 ? [MULTI_PAGE.subtotalLine] : undefined,
+    })),
+  });
+}
+
+/** The angle of the stamp, in degrees. It is far above the 5-degree tilt that a scan can give (see classify-page.ts). */
+export const STAMP_ANGLE = 45;
+
+/**
+ * A normal table with a large "PAID" stamp turned 45 degrees across it, as a
+ * rubber stamp or a watermark would be. The stamp must be dropped with a note,
+ * and the table read as normal.
+ */
+export function rotatedStamp(): Promise<Uint8Array> {
+  return buildWith([{}], (doc) => {
+    doc.save();
+    doc.rotate(-STAMP_ANGLE, { origin: [300, 250] });
+    doc.fontSize(36).text("PAID", 300, 250, { lineBreak: false });
+    doc.restore();
+  });
+}
+
+/**
+ * The columns of the shifted-columns fixture. The x positions differ from
+ * DEFAULT_COLUMNS (Qty at 300, not 326; the fourth column at 360, not 377), so
+ * a detector that expects fixed positions fails on it.
+ */
+export const SHIFTED_COLUMNS: ColumnSpec[] = [
+  { header: "Item", x: 43 },
+  { header: "Description", x: 75 },
+  { header: "Qty", x: 300 },
+  { header: "Weight", x: 360 },
+  { header: "Unit Price", x: 455 },
+];
+
+/**
+ * The rows of the shifted-columns fixture. There is no line total. Every unit
+ * price ends in "/<unit>". Exactly one weight cell says "total": it gives the
+ * weight of the whole line, while the others give the weight of one item. That
+ * must give the mixed-wording warning.
+ */
+export const SHIFTED_ROWS: string[][] = [
+  ["1", "Garden lime 20kg sack", "6", "20kg", "$14.40 /bag"],
+  ["2", "Brass hinge 75mm", "12", "85g", "$3.15 /ea"],
+  ["3", "Cup hook set", "4", "600g total", "$2.60 /ea"],
+  ["4", "Bamboo stakes 1.2m", "3", "2.5kg", "$9.80 /bundle"],
+];
+
+/** The line below the shifted-columns table: a total label with no amount. */
+export const SHIFTED_AFTER_LINE = "Total load weight: see each line.";
+
+/** Item | Description | Qty | Weight | Unit Price at shifted positions, with a total label below that has no amount. */
+export function shiftedColumns(): Promise<Uint8Array> {
+  return buildPdf({ pages: [{ columns: SHIFTED_COLUMNS, rows: SHIFTED_ROWS, after: [SHIFTED_AFTER_LINE] }] });
+}
+
+/**
+ * The titles of the five titled pages, in order. Each is a "Name - Title"
+ * line. Pages 1 to 4 use a summary word, a returns word, a credit word and an
+ * acceptance word. Page 5's title has none of them. Instead, a "Summary: ..."
+ * label line sits above its header (TITLED_PAGES_LABEL_LINE). That line must
+ * NOT give the summary warning, because label lines are not titles.
+ */
+export const TITLED_PAGE_TITLES = [
+  "Kestrel Road Run 12 - Weekly Summary",
+  "Kestrel Road Run 12 - Returns Slip",
+  "Kestrel Road Run 12 - Credit Memo",
+  "Kestrel Road Run 12 - Customer Acceptance",
+  "Kestrel Road Run 12 - Yard Pickup",
+] as const;
+
+/** The label line above page 5's header. */
+export const TITLED_PAGES_LABEL_LINE = "Summary: 9 crates packed at the yard";
+
+/**
+ * Where the label line on page 5 is drawn: 26 pt above the header. So it is
+ * clearly its own line, and it is never merged into the header (table.ts
+ * merges a second header line only when it is less than 1.3 x the font size
+ * above, which is 11.7 pt here).
+ */
+const LABEL_LINE_Y = 150;
+
+/** Five pages with the same table and the titles above. */
+export function titledPages(): Promise<Uint8Array> {
+  const pages: PageSpec[] = TITLED_PAGE_TITLES.map((title) => ({ title }));
+  return buildWith(pages, (doc, index) => {
+    if (index === pages.length - 1) text(doc, TITLED_PAGES_LABEL_LINE, 43, LABEL_LINE_Y);
+  });
+}
+
+/** The row of mismatchRow() whose arithmetic is wrong, counting from 0: 8 x $22.25 is $178.00, not $187.00. */
+export const MISMATCH_ROW_INDEX = 1;
+
+/** The default page, with one row whose line total is not qty x unit price. */
+export function mismatchRow(): Promise<Uint8Array> {
+  const rows = DEFAULT_ROWS.map((row) => [...row]);
+  rows[MISMATCH_ROW_INDEX][5] = "$187.00";
+  return buildPdf({ pages: [{ rows }] });
+}
+
+/** The price cell of unparseableCell() that is not a clean number: a unit word with no "/". */
+export const UNPARSEABLE_PRICE = "$12.50 box";
+
+/** The default page, with one unit price cell that has a unit word after it without a "/". */
+export function unparseableCell(): Promise<Uint8Array> {
+  const rows = DEFAULT_ROWS.map((row) => [...row]);
+  rows[1] = ["2", "Tile spacers 3mm", "4", "box", UNPARSEABLE_PRICE, "$50.00"];
+  return buildPdf({ pages: [{ rows }] });
+}
+
+/** The row added by numbersOnlyRow(): numbers in every numeric column, and an empty description. */
+export const NUMBERS_ONLY_ROW: string[] = ["4", "", "6", "ea", "$3.00", "$18.00"];
+
+/** The default page plus a fourth row that has numbers but no description. */
+export function numbersOnlyRow(): Promise<Uint8Array> {
+  return buildPdf({ pages: [{ rows: [...DEFAULT_ROWS, NUMBERS_ONLY_ROW] }] });
 }
