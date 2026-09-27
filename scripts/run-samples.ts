@@ -69,7 +69,9 @@ async function runFile(name: string): Promise<number> {
   );
 
   for (const page of result.pages) {
-    const refusals = result.refusals.filter((refusal) => refusal.page === page.page).map((refusal) => refusal.code);
+    const refusals = result.refusals
+      .filter((refusal) => refusal.page === page.page && (refusal.scope === "page" || refusal.scope === "row"))
+      .map((refusal) => refusal.code);
     console.log(
       `  page ${String(page.page).padStart(2)}  ${page.status.padEnd(9)}  ${String(page.itemCount).padStart(2)} item(s)` +
         `  notes: ${notesByLevel(page.notes)}` +
@@ -82,6 +84,17 @@ async function runFile(name: string): Promise<number> {
   }
   const documentFindings = result.refusals.filter((refusal) => refusal.scope === "document");
   for (const finding of documentFindings) console.log(`  document: ${finding.code}`);
+  // The printed totals, the check of the lines against them, and its refusals.
+  for (const total of result.totals.stated) {
+    console.log(`  stated ${total.label}${total.labelKnown ? "" : " (label not recognised)"} on page ${total.page}: ${total.amount.raw}`);
+  }
+  for (const check of result.totals.checks) {
+    const detail = check.derived ? `lines add up to ${check.derived.value} (calculated by us)` : check.reason;
+    console.log(`  check ${check.name}: ${check.outcome}, ${detail}`);
+  }
+  for (const refusal of result.refusals.filter((candidate) => candidate.scope === "totals")) {
+    console.log(`  totals: ${refusal.code}`);
+  }
   for (const failure of outcome.diagnostics) {
     console.log(`  log: page ${failure.page} ${failure.stage} ${failure.cause} ${failure.errorName ?? ""}`);
   }
