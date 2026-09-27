@@ -23,6 +23,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  CHECK_REASONS,
   DOCUMENT_PROBLEM_TITLES,
   INTERNAL_PROBLEM,
   REFUSAL_MESSAGES,
@@ -149,6 +150,7 @@ const SAMPLES: { [Code in RefusalCode]: MessageContexts[Code][] } = {
     { reason: "pageNotRead", label: "total", totalPage: 2, page: 1, status: "partial" },
     { reason: "pageNotRead", label: "subtotal", totalPage: 2, page: 1, status: "refused" },
     { reason: "pageNotRead", label: "total", totalPage: 3, page: 2, status: "blank" },
+    { reason: "pageNotRead", label: "total", totalPage: 2, page: 1, status: "refused", noTable: true },
     { reason: "missingLineTotal", label: "total", totalPage: 2, page: 1 },
     {
       reason: "twoAmounts",
@@ -237,7 +239,13 @@ describe("refusal messages", () => {
   });
 
   it("names the page of each amount when a total is printed twice", () => {
-    expect(sample("TOTALS_UNVERIFIABLE", 4)).toContain("($500.00 on page 1 and $550.00 on page 2)");
+    expect(sample("TOTALS_UNVERIFIABLE", 5)).toContain("($500.00 on page 1 and $550.00 on page 2)");
+  });
+
+  it("says that a page with no table may hold lines, instead of saying it couldn't be read", () => {
+    expect(sample("TOTALS_UNVERIFIABLE", 3)).toBe(
+      "We couldn't check the total on page 2 because page 1 has no table we could read, so it may hold lines we didn't see.",
+    );
   });
 
   it("says what a page without readable text has instead", () => {
@@ -322,6 +330,16 @@ const NOTE_SAMPLES: { [Name in keyof typeof NOTES]: Parameters<(typeof NOTES)[Na
   headingFollowed: [7, "Item", "codes", "item number"],
   headingTwoMeanings: [7, "Qty Unit"],
   mixedTotalWording: [7, "Weight", ["25kg", "480g total"]],
+  totalLabelNoAmount: [7, "Total consignment weight: see each line."],
+  totalAmountNotRead: [7, "Total: $500.00 NZD"],
+  totalNotMoney: [7, "Total 25"],
+  unknownLabelTotalUsed: [7, "Summe: 1.234,50 €"],
+  unknownFigureAlsoMatches: [7, "Netto: 1.234,50 €"],
+  unknownFigureNotPlaced: [7, "Endbetrag: 1.300,00 €"],
+  unknownFigureNotCompared: [7, "Endbetrag: 1.300,00 €"],
+  unknownFigureIgnored: [7, "Freight: $36.50"],
+  unknownFigureIgnoredTax: [7, "Zwischensumme: 364,00 €"],
+  figureBeforeLines: [7, "Übertrag: 364,00 €"],
   summaryPage: [7, "Summary"],
   unknownHeadings: [7],
   noHeadings: [7],
@@ -339,6 +357,13 @@ describe("notes", () => {
 
   it("quotes every example in the mixed-wording warning", () => {
     expect(NOTES.mixedTotalWording(1, "Weight", ["25kg", "480g total"]).text).toContain("('25kg' and '480g total')");
+  });
+});
+
+describe("the reasons a totals check didn't run", () => {
+  it.each(Object.entries(CHECK_REASONS))("%s is one plain sentence", (_name, reason) => {
+    expect(reason).toMatch(/^[A-Z].*\.$/);
+    for (const pattern of FORBIDDEN) expect(reason).not.toMatch(pattern);
   });
 });
 

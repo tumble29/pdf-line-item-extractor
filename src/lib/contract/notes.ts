@@ -140,6 +140,60 @@ export const NOTES = {
         "so we kept them as printed text and didn't read them as numbers.",
     ),
 
+  // --- Printed totals ---------------------------------------------------------
+
+  // Every printed figure near the table that we don't use as the total gets
+  // exactly one of the notes below, which says why.
+
+  /** A line that starts with a totals label but has no amount ("Total weight: see each line."). */
+  totalLabelNoAmount: (page: number, text: string): Note =>
+    info(`On page ${page}, the line '${text}' has a total's label but no amount, so we didn't use it as a total.`),
+
+  /** A line that looks like a total, but whose amount we couldn't read ("Total: $500.00 NZD", "Total 25 $413.50"). */
+  totalAmountNotRead: (page: number, text: string): Note =>
+    info(`On page ${page}, the line '${text}' looks like a total, but we couldn't read its amount, so we didn't use it.`),
+
+  /** A figure under a totals label that looks like a count: a whole number with no currency marker, under line totals with decimals. */
+  totalNotMoney: (page: number, text: string): Note =>
+    info(
+      `On page ${page}, we didn't use '${text}' as a money total: it is a whole number with no currency sign, ` +
+        "while the line totals have cents, so it may be a count.",
+    ),
+
+  /** A figure under a label we don't recognise that equals the sum of the lines, so it was used as the total. */
+  unknownLabelTotalUsed: (page: number, text: string): Note =>
+    info(`On page ${page}, '${text}' equals the sum of the lines, so we used it as the total, though we don't recognise its label.`),
+
+  /** A figure under a label we don't recognise that equals the lines too, while a later one was used. */
+  unknownFigureAlsoMatches: (page: number, text: string): Note =>
+    info(`On page ${page}, '${text}' also equals the sum of the lines, but we used the figure printed after it as the total.`),
+
+  /** A figure under a label we don't recognise that is not the sum of the lines. */
+  unknownFigureNotPlaced: (page: number, text: string): Note =>
+    info(`On page ${page}, we didn't use '${text}' as the total: we don't recognise its label, and it isn't the sum of the lines.`),
+
+  /** A figure under a label we don't recognise, when the lines couldn't be added up to compare with it. */
+  unknownFigureNotCompared: (page: number, text: string): Note =>
+    info(
+      `On page ${page}, we didn't use '${text}' as the total: we don't recognise its label, ` +
+        "and we couldn't add up the lines to compare with it.",
+    ),
+
+  /** A figure under a label we don't recognise, when a total we do recognise is printed. */
+  unknownFigureIgnored: (page: number, text: string): Note =>
+    info(`On page ${page}, we didn't use '${text}': we don't recognise its label, and a total we do recognise is printed.`),
+
+  /** A figure under a label we don't recognise, on a document with a tax or discount line and no subtotal. */
+  unknownFigureIgnoredTax: (page: number, text: string): Note =>
+    info(
+      `On page ${page}, we didn't use '${text}' as the total: we don't recognise its label, and a tax or discount line ` +
+        "is printed, so we can't tell what the figures include.",
+    ),
+
+  /** A figure printed on a page before other lines, so it can't be the total of every line. */
+  figureBeforeLines: (page: number, text: string): Note =>
+    info(`On page ${page}, we didn't use '${text}' as the document's total, because there are lines on later pages.`),
+
   // --- Titles and headings ----------------------------------------------------
 
   /** A page titled Summary or Acceptance: its lines may repeat lines from other pages. */

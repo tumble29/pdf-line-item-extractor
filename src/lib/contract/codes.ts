@@ -242,6 +242,8 @@ export interface MessageContexts {
         totalPage: number;
         page: number;
         status: "partial" | "refused" | "blank";
+        /** True when that page was refused because no table was found on it (it may hold lines we didn't see). */
+        noTable?: boolean;
       }
     | { reason: "missingLineTotal"; label: StatedTotal["label"]; totalPage: number; page: number }
     | { reason: "twoAmounts"; label: StatedTotal["label"]; amounts: TwoOrMore<Mention> };
@@ -401,11 +403,13 @@ export const REFUSAL_MESSAGES: { [Code in RefusalCode]: (context: MessageContext
   TOTALS_UNVERIFIABLE: (context) => {
     const label = TOTAL_WORDS[context.label];
     if (context.reason === "pageNotRead") {
-      const what = {
-        partial: "was only partly read",
-        refused: "couldn't be read",
-        blank: "is blank",
-      }[context.status];
+      const what = context.noTable
+        ? "has no table we could read, so it may hold lines we didn't see"
+        : {
+            partial: "was only partly read",
+            refused: "couldn't be read",
+            blank: "is blank",
+          }[context.status];
       return `We couldn't check the ${label} on page ${context.totalPage} because page ${context.page} ${what}.`;
     }
     if (context.reason === "missingLineTotal") {
@@ -422,6 +426,35 @@ export const REFUSAL_MESSAGES: { [Code in RefusalCode]: (context: MessageContext
   },
   NO_LINE_ITEMS_FOUND: () => "We read every page but found no table of line items.",
 };
+
+/**
+ * Why a check of the lines against a printed total didn't run
+ * (TotalsCheck.reason). Each is a plain sentence. When a refusal explains it
+ * (a total that couldn't be checked, or that has two readings), the check
+ * uses the refusal's own message instead, so the two always say the same
+ * thing.
+ */
+export const CHECK_REASONS = {
+  /** No subtotal or total on any page we could read (a scanned page may still have one). */
+  nothingStated: "We found no subtotal or total on the pages we could read, so there was nothing to check the lines against.",
+  /** A total next to a GST, tax or discount line, but no subtotal: the total may or may not include that line. */
+  gstNoSubtotal: "A GST, tax or discount line is printed but no subtotal, so we can't tell whether the total should equal the lines.",
+  /** Only figures under labels we don't know, and none of them is the sum of the lines. */
+  unknownFigure: "The figures near the table have labels we don't recognise, and none is the sum of the lines, so we didn't check them.",
+  /** Only figures under labels we don't know, and the lines couldn't be added up to compare with them. */
+  unknownNotCompared: "We couldn't add up the lines, so we didn't compare them with the figures we found near the table.",
+  /** Every subtotal or total is printed before some of the lines, so none covers them all. */
+  earlyTotal: "The subtotal or total is printed before some of the lines, so it can't cover them all, and we didn't check it.",
+  /** A line looks like a total, but its amount couldn't be read. */
+  totalNotRead: "A total is printed, but we couldn't read its amount, so we didn't check the lines against it.",
+  /** The only figures under a totals label look like counts ("Total 25" under "$186.00" lines), so none was used. */
+  totalLooksLikeCount:
+    "The only total we found looks like a count, not an amount of money, so we didn't check the lines against it.",
+  /** The printed total was found, but no line in its pages was listed. */
+  noLines: "No line was listed on the pages this total covers, so there was nothing to add up.",
+  /** The printed total failed the evidence check, so it was left out. */
+  totalNotProved: "We couldn't match the printed total to the page's text, so we didn't check it.",
+} as const;
 
 /**
  * The sentence for one refusal. This is the only function the engine calls to
