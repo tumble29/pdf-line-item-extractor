@@ -34,9 +34,11 @@ describe("problems", () => {
     expect((await response.json()).detail).toContain("No file arrived");
   });
 
-  it("sends a result with status 200 and the request id header", () => {
-    const response = resultResponse({ requestId: "req-7" } as never);
+  it("sends a result's JSON as given, with status 200, the JSON content type and the request id header", async () => {
+    const response = resultResponse({ requestId: "req-7" } as never, '{"requestId":"req-7"}');
     expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/json");
     expect(response.headers.get("x-request-id")).toBe("req-7");
+    expect(await response.text()).toBe('{"requestId":"req-7"}');
   });
 });

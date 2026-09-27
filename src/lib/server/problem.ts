@@ -7,7 +7,8 @@
  *
  *   200  a ParseResult: the file opened (it may still contain refusals)
  *   4xx  a Problem: the whole file was refused (no file, an empty file, too
- *        large, not a PDF, protected, damaged, too many pages)
+ *        large, not a PDF, protected, damaged, too many pages, or too many
+ *        line items to send back)
  *   500  a Problem with code INTERNAL: our own code failed
  *
  * Problems follow RFC 9457 and use the content type `application/problem+json`.
@@ -54,7 +55,14 @@ export function problemResponse(problem: Problem): Response {
   });
 }
 
-/** Sends a ParseResult with status 200 and the request id header. */
-export function resultResponse(result: ParseResult): Response {
-  return Response.json(result, { status: 200, headers: { "x-request-id": result.requestId } });
+/**
+ * Sends a ParseResult with status 200 and the request id header. `body` is the
+ * result already turned into JSON: the route measures its size before sending
+ * it (MAX_REPLY_BYTES), so it is only turned into JSON once.
+ */
+export function resultResponse(result: ParseResult, body: string): Response {
+  return new Response(body, {
+    status: 200,
+    headers: { "content-type": "application/json", "x-request-id": result.requestId },
+  });
 }
