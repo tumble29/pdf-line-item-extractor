@@ -2,11 +2,18 @@
  * The interactive part of the page: the file picker, the upload's progress,
  * and its outcome.
  *
- * It renders the upload state from use-upload.ts. The outcome of a finished
- * upload is rendered by switching on `outcome.state`: a result gets the full
- * ResultView, and every other state gets the OutcomePanel with its own
- * sentence. The switch ends with assertNever, so an outcome without a screen
- * fails the TypeScript build instead of showing a blank panel.
+ * It renders the upload state from use-upload.ts, top to bottom:
+ *   1. the file picker
+ *   2. while reading: the progress panel with Cancel
+ *   3. when the reply fits our contract (a result, a refused file, or our
+ *      own bug): the JSON result, the server's reply laid out for reading,
+ *      hidden until shown (json-result.tsx). The JSON is the task's main
+ *      output, so it comes right after the picker.
+ *   4. the outcome in plain words. It is rendered by switching on
+ *      `outcome.state`: a result gets the full ResultView, and every other
+ *      state gets the OutcomePanel with its own sentence. The switch ends with
+ *      assertNever, so an outcome without a screen fails the TypeScript build
+ *      instead of showing a blank panel.
  *
  * For keyboard and screen-reader users:
  *   - One live region is always on the page (a live region that appears
@@ -23,14 +30,34 @@
 
 import { useEffect, useRef, type Ref } from "react";
 
-import type { UploadOutcome } from "@/lib/client/parse-client";
+import type { ServerReply, UploadOutcome } from "@/lib/client/parse-client";
 import { assertNever, outcomeCopy } from "@/lib/client/transport-copy";
 import { useUpload, type UploadState } from "@/lib/client/use-upload";
 
 import { summarySentence } from "./format";
+import { JsonResult } from "./json-result";
 import { ResultView } from "./result-view";
 import { OutcomePanel, UploadingPanel } from "./status-panel";
 import { UploadForm } from "./upload-form";
+
+/**
+ * The server's reply and its request id, for the outcomes whose reply fits
+ * our contract. The other outcomes have no reply this page could read: the
+ * file wasn't sent, the network failed, the reply was cut off, or it didn't
+ * fit the contract (even when it came from our server).
+ */
+function serverReplyOf(outcome: UploadOutcome): { reply: ServerReply; requestId: string } | null {
+  switch (outcome.state) {
+    case "result":
+      return { reply: outcome.reply, requestId: outcome.data.requestId };
+    case "document_refused":
+      return { reply: outcome.reply, requestId: outcome.problem.requestId };
+    case "server_bug":
+      return { reply: outcome.reply, requestId: outcome.requestId };
+    default:
+      return null;
+  }
+}
 
 /** What the live region says in each state. */
 function announcementOf(state: UploadState): string {
@@ -50,6 +77,7 @@ export function Extractor() {
   const titleRef = useRef<HTMLHeadingElement>(null);
 
   const outcome = state.phase === "done" ? state.outcome : null;
+  const server = outcome ? serverReplyOf(outcome) : null;
   useEffect(() => {
     if (outcome) titleRef.current?.focus();
   }, [outcome]);
@@ -78,6 +106,8 @@ export function Extractor() {
       {state.phase === "uploading" && (
         <UploadingPanel fileName={state.fileName} bytes={state.bytes} startedAt={state.startedAt} onCancel={cancel} />
       )}
+      {/* Keyed by the request, so each new reply starts hidden. */}
+      {server && <JsonResult key={server.requestId} reply={server.reply} />}
       {state.phase === "done" && (
         <Outcome fileName={state.fileName} outcome={state.outcome} onRetry={retry} onReset={chooseAnother} titleRef={titleRef} />
       )}

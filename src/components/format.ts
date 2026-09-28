@@ -5,7 +5,8 @@
  * exactly as sent. These helpers only name things the engine gives as data:
  * a page's status, a column without a heading, a file size, how numbers are
  * written, the summary counts, and the kind of a printed total. Each one says
- * only what the result proves.
+ * only what the result proves. One more helper lays out the server's JSON for
+ * reading, without changing it.
  */
 import type { NumberFormat, PageReport, ParseResult, StatedTotal } from "@/lib/contract/schema";
 
@@ -144,6 +145,19 @@ export function summaryParts(result: ParseResult): { parts: string[]; listed: bo
 export function summarySentence(result: ParseResult): string {
   const { parts, listed } = summaryParts(result);
   return `${parts.join(" · ")}${listed ? ", listed below" : ""}.`;
+}
+
+/**
+ * A JSON text laid out for reading, two spaces per level. Parsing and writing
+ * it again keeps the keys in the order the server sent them, and changes no
+ * value. A text that isn't JSON is returned as it is, so nothing is ever lost.
+ */
+export function prettyJson(text: string): string {
+  try {
+    return JSON.stringify(JSON.parse(text), null, 2);
+  } catch {
+    return text;
+  }
 }
 
 /** How a printed total's kind is named on the page. */

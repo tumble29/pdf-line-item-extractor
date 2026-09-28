@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { columnName, fileSize, numberFormatSentence, pageStatusLabel, plural } from "@/components/format";
+import { columnName, fileSize, numberFormatSentence, pageStatusLabel, plural, prettyJson } from "@/components/format";
 import type { PageReport } from "@/lib/contract/schema";
 
 /** A page report with the given status and notes. */
@@ -100,5 +100,20 @@ describe("small words", () => {
     expect(fileSize(900)).toBe("900 bytes");
     expect(plural(1, "page")).toBe("1 page");
     expect(plural(3, "page")).toBe("3 pages");
+  });
+});
+
+describe("prettyJson", () => {
+  it("lays JSON out with two spaces per level, keeping the server's key order and every value", () => {
+    const text = '{"requestId":"r-1","kind":"result","items":[{"value":1.5,"raw":"1,50 €"}]}';
+    const pretty = prettyJson(text);
+    expect(pretty).toBe(
+      ['{', '  "requestId": "r-1",', '  "kind": "result",', '  "items": [', "    {", '      "value": 1.5,', '      "raw": "1,50 €"', "    }", "  ]", "}"].join("\n"),
+    );
+    expect(JSON.parse(pretty)).toEqual(JSON.parse(text));
+  });
+
+  it("gives back a text that isn't JSON as it is", () => {
+    expect(prettyJson("<html>Gateway</html>")).toBe("<html>Gateway</html>");
   });
 });
