@@ -160,7 +160,7 @@ pdf.js doesn't give a table. It gives a flat list of text pieces, each with a po
 
 ## Tests
 
-1,042 tests (Vitest). The refusal rules are tested in `tests/engine/`, one file per part of the engine (for example `items.test.ts` for refused rows, `totals.test.ts` for the totals check, `contradictions.test.ts` for conflicting counts). A few tests matter most:
+1,042 tests (Vitest). The refusal rules are tested in `tests/engine/`, one file per part of the engine: for example `items.test.ts` for refused rows, `roles.test.ts` for column meanings, `numbers.test.ts` for number formats and numbers with two readings, `languages.test.ts` for the French, German and Vietnamese tables, `totals.test.ts` for the totals check and `contradictions.test.ts` for conflicting counts. A few tests matter most:
 
 - `tests/engine/hard-rule.test.ts` runs 30 named test PDFs and all six samples through the engine, and checks that every number points back to the exact characters of its source.
 - `tests/engine/containment.test.ts` breaks one page (it throws, or never finishes) and checks that the other pages give exactly the same items.
