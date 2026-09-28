@@ -18,10 +18,12 @@
  * time someone presses "Show JSON" or "Copy JSON", never just because it
  * arrived.
  *
- * Copying can fail (a browser can block the clipboard). The status next to
- * the button then says so and says what to do instead, never a vague
- * message. That status is its own small live region, and every press gives
- * it new text, so a screen reader hears "Copied" each time.
+ * After a copy, the button says "Copied" instead of "Copy JSON" for two
+ * seconds. Copying can fail (a browser can block the clipboard): the button
+ * then keeps its name, and a sentence next to it says so and says what to do
+ * instead, never a vague message. That sentence is also a small live region,
+ * hidden from sight while it only says "Copied.", and every press gives it
+ * new text, so a screen reader hears the outcome of each press.
  */
 "use client";
 
@@ -31,7 +33,7 @@ import type { ServerReply } from "@/lib/client/parse-client";
 
 import { fileSize, prettyJson } from "./format";
 
-/** How long "Copied" stays next to the button, in milliseconds. */
+/** How long the button says "Copied", in milliseconds. */
 const COPIED_MS = 2000;
 
 /** The styles of the section's two buttons. */
@@ -45,7 +47,7 @@ const BUTTON =
  */
 type CopyState = { result: "none" | "copied" | "failed"; presses: number };
 
-/** The words for each copy result (none before the first press, or after "Copied." fades). */
+/** What the live region says for each copy result (nothing before the first press, or once "Copied" is over). */
 const COPY_WORDS: Record<CopyState["result"], string> = {
   none: "",
   copied: "Copied.",
@@ -80,7 +82,7 @@ export function JsonResult({ reply }: { reply: ServerReply }) {
     return text;
   };
 
-  // "Copied." goes away by itself; a failure stays until the next press.
+  // "Copied" goes away by itself; a failure stays until the next press.
   useEffect(() => {
     if (copy.result !== "copied") return;
     const timer = setTimeout(() => setCopy((last) => ({ ...last, result: "none" })), COPIED_MS);
@@ -109,17 +111,23 @@ export function JsonResult({ reply }: { reply: ServerReply }) {
         >
           {open ? "Hide JSON" : "Show JSON"}
         </button>
+        {/* A minimum width, so the button doesn't shrink while it says "Copied". */}
         <button
           type="button"
           onClick={async () => {
             const copied = await copyText(laidOut());
             setCopy((last) => ({ result: copied ? "copied" : "failed", presses: last.presses + 1 }));
           }}
-          className={BUTTON}
+          className={`${BUTTON} min-w-28`}
         >
-          Copy JSON
+          {copy.result === "copied" ? "Copied" : "Copy JSON"}
         </button>
-        <span role="status" aria-live="polite" className="text-sm text-neutral-600 dark:text-neutral-400">
+        {/* Seen only when copying failed; a screen reader hears it every time. */}
+        <span
+          role="status"
+          aria-live="polite"
+          className={copy.result === "failed" ? "text-sm text-neutral-600 dark:text-neutral-400" : "sr-only"}
+        >
           {/* A new key per press puts new text in the live region, even when
               the words are the same as last time. */}
           <span key={copy.presses}>{COPY_WORDS[copy.result]}</span>
