@@ -40,17 +40,30 @@
  * Anything that throws outside those steps is this page's own bug, and comes
  * back as page_bug.
  *
+ * The three outcomes whose reply fits our contract (result, document_refused
+ * and server_bug) also keep the reply exactly as it arrived (`reply`: its
+ * status and its text), so the page can show the JSON itself, not a copy
+ * rebuilt from the parsed data. A reply that doesn't fit (bad_response, even
+ * our own JSON from a newer server) or that was cut off (reply_cut) keeps no
+ * text: the page can't read it, so it doesn't show it.
+ *
  * The words for each outcome that is not a server message are in
  * transport-copy.ts.
  */
 import { MAX_UPLOAD_BYTES } from "@/lib/contract/limits";
 import { ParseResult, Problem } from "@/lib/contract/schema";
 
+/** A reply from our own server exactly as it arrived: its HTTP status and its body's text. */
+export interface ServerReply {
+  status: number;
+  text: string;
+}
+
 /** Every way one upload can end. */
 export type UploadOutcome =
-  | { state: "result"; data: ParseResult }
-  | { state: "document_refused"; problem: Problem }
-  | { state: "server_bug"; requestId: string; detail: string }
+  | { state: "result"; data: ParseResult; reply: ServerReply }
+  | { state: "document_refused"; problem: Problem; reply: ServerReply }
+  | { state: "server_bug"; requestId: string; detail: string; reply: ServerReply }
   | { state: "too_large_local"; bytes: number }
   | { state: "too_large_platform"; bytes: number }
   | { state: "file_unreadable" }
@@ -171,17 +184,17 @@ function stoppedOutcome(userSignal: AbortSignal, timeout: AbortSignal, seconds: 
   return otherwise;
 }
 
-/** A reply that fits the contract, as its outcome. */
-function outcomeOfBody(body: unknown, status: number): UploadOutcome | null {
+/** A reply that fits the contract, as its outcome. `reply` is the reply as it arrived. */
+function outcomeOfBody(body: unknown, reply: ServerReply): UploadOutcome | null {
   const result = ParseResult.safeParse(body);
-  if (result.success) return { state: "result", data: result.data };
+  if (result.success) return { state: "result", data: result.data, reply };
   const problem = Problem.safeParse(body);
   if (!problem.success) return null;
   // Our own failure is never shown as a refusal of the person's file.
   if (problem.data.code === "INTERNAL") {
-    return { state: "server_bug", requestId: problem.data.requestId, detail: problem.data.detail };
+    return { state: "server_bug", requestId: problem.data.requestId, detail: problem.data.detail, reply };
   }
-  return status === problem.data.status ? { state: "document_refused", problem: problem.data } : null;
+  return reply.status === problem.data.status ? { state: "document_refused", problem: problem.data, reply } : null;
 }
 
 /** True when `body` has the shape of our own JSON: an object whose `kind` is "result" or "problem". */
@@ -266,7 +279,7 @@ async function send(file: File, userSignal: AbortSignal, deps: ClientDeps): Prom
   } catch {
     // Not JSON: an HTML or plain-text page from the platform or a proxy.
   }
-  const fromBody = body === undefined ? null : outcomeOfBody(body, status);
+  const fromBody = body === undefined ? null : outcomeOfBody(body, { status, text });
   if (fromBody) return fromBody;
 
   // 7. Anything else, by its status. The size given is the size of the bytes

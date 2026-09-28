@@ -70,20 +70,25 @@ function wordsOf(outcome: UploadOutcome): string {
 describe("parseFile", () => {
   it("returns the result when the server read the file", async () => {
     const outcome = await run(answering(200, JSON.stringify(RESULT)));
-    expect(outcome).toEqual({ state: "result", data: RESULT });
+    expect(outcome).toEqual({ state: "result", data: RESULT, reply: { status: 200, text: JSON.stringify(RESULT) } });
   });
 
   it("returns the refused file, with the server's own sentence, for our 422 problem", async () => {
     const problem = documentProblem(documentRefusal({ code: "ENCRYPTED" }), "req-2");
     const outcome = await run(answering(422, JSON.stringify(problem), "application/problem+json"));
-    expect(outcome).toEqual({ state: "document_refused", problem });
+    expect(outcome).toEqual({ state: "document_refused", problem, reply: { status: 422, text: JSON.stringify(problem) } });
     expect(wordsOf(outcome)).toBe(refusalMessage({ code: "ENCRYPTED" }));
   });
 
   it("returns our own bug for a 500 INTERNAL problem, never a refused file", async () => {
     const problem = internalProblem("3f1c9a52-8d7e-4b1a-9c55-0e2f6b7d4a10");
     const outcome = await run(answering(500, JSON.stringify(problem), "application/problem+json"));
-    expect(outcome).toEqual({ state: "server_bug", requestId: problem.requestId, detail: problem.detail });
+    expect(outcome).toEqual({
+      state: "server_bug",
+      requestId: problem.requestId,
+      detail: problem.detail,
+      reply: { status: 500, text: JSON.stringify(problem) },
+    });
     expect(wordsOf(outcome)).toBe(INTERNAL_PROBLEM.message({ reference: "3f1c9a52" }));
   });
 
@@ -141,6 +146,15 @@ describe("parseFile", () => {
   it("returns a bad response for our problem sent with the wrong status", async () => {
     const problem = documentProblem(documentRefusal({ code: "ENCRYPTED" }), "req-3");
     expect(await run(answering(200, JSON.stringify(problem)))).toEqual({ state: "bad_response", status: 200, requestId: null, ours: true });
+  });
+
+  it("keeps the reply's text exactly as it arrived, whatever its spacing and key order", async () => {
+    // The page shows this text, so it must not be rebuilt from the parsed data
+    // (which would put the keys in the schema's order).
+    const text = `{ "requestId": "req-1",\n  "kind": "result", ${JSON.stringify(RESULT).slice(1).replace('"kind":"result","requestId":"req-1",', "")}`;
+    const outcome = await run(answering(200, text));
+    expect(outcome.state).toBe("result");
+    expect(outcome.state === "result" && outcome.reply).toEqual({ status: 200, text });
   });
 
   it("sends the file's own bytes, name and type in the 'file' field", async () => {
